@@ -1,0 +1,8 @@
+# help to configure the .getignore file https://www.freecodecamp.org/news/gitignore-file-how-to-ignore-files-and-folders-in-git/
+
+# ignores all the files that end in the following extentions
+.csv
+.docx
+
+# ignores the .vscode directory that is created when debugging in VS code
+.vscode/
