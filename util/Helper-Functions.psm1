@@ -332,7 +332,6 @@ function Get-RequiredDrives {
 }
 
 <#
-<#
 .SYNOPSIS
 Return a unique list of source and destination combinations from the supplied data
 
@@ -359,8 +358,7 @@ $Results = Get-UniqueDriveToFrom -SourceDestination $Data -Restoring
 $Results = Get-UniqueDriveToFrom -SourceDestination $Data -Restoring:$true OR $false
 
 .NOTES
-N.A.
-#>
+(WIP) Need some priority logic to say, "If the source directory has more of the same drive letter then the destination side, use the source side as the 1->* connection.  However, it the destination directory has more of the same drive letter than the source, use the destinations side as the the 1->* connection".
 #>
 function Get-UniqueDriveToFrom {
     [CmdletBinding()]
