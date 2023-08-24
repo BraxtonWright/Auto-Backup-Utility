@@ -48,7 +48,7 @@ This will fetch all the jobs you have created inside the "Jobs" folder and retur
 $Entry = Get-AvailableJobs
 
 .NOTES
-N.A.
+Returns an array of PSCustomObjects
 #>
 Function Get-AvailableJobs {
     [CmdletBinding()]
@@ -60,12 +60,12 @@ Function Get-AvailableJobs {
     foreach ($csv in (Get-ChildItem ./Jobs -Filter *.csv | Select-Object Name)) {
         Write-Verbose "Job Discovered: ""$($csv.Name)"""
         $Jobs += [PSCustomObject]@{
-                FileName     = "$([System.IO.Path]::GetFileNameWithoutExtension($csv.Name))"
+                Name     = "$([System.IO.Path]::GetFileNameWithoutExtension($csv.Name))"
                 JobOperation = $Null
             }
     }
 
-    $Jobs | Sort-Object FileName # Sort the Jobs by the job's file name
+    $Jobs | Sort-Object Name # Sort the Jobs by the job's file name
 
     # How you will iterate through this data that is returned
     # foreach ($Entry in $Jobs) {
@@ -88,11 +88,8 @@ This will return a hashtable with the name of the job file as the key and it con
 .PARAMETER Entry
 The name of the job to read
 
-.PARAMETER ProcessType
-Either "backup" or "restore"
-
 .EXAMPLE
-Get-JobContent -AllJobs "Game Files" -ProcessType "backup"
+Get-JobContent -Entry "Game Files" -ProcessType "backup"
 Get-JobContent "Game Saves" "restore"
 
 .NOTES
@@ -108,32 +105,32 @@ function Get-JobsContent {
     $JobsData = @{}  #makes a HashTable to store the jobs data
     $DuplicatedProcesses = $false
 
-    foreach ($JobFileName in $Entry.FileName) {
+    foreach ($JobName in $Entry.Name) {
         $SourceDestProcess = @() # this array is used to store a unique list of Source-Destination combinations
 
-        Write-Verbose "Importing the file from here ""./Jobs/$JobFileName.csv"""
+        Write-Verbose "Importing the file from here ""./Jobs/$JobName.csv"""
         try {
-            $CSVImported = Import-csv "./Jobs/$JobFileName.csv" -Delimiter ","  #Attempt to import the csv file so that the script can read it (returns an array of objects)
+            $CSVImported = Import-csv "./Jobs/$JobName.csv" -Delimiter ","  #Attempt to import the csv file so that the script can read it (returns an array of objects)
         }
         catch {
             #Something happened and script is unable to import the file
-            Write-Host "Error opening the CSV file `"$($JobFileName)`", error generated:
+            Write-Host "Error opening the CSV file `"$($JobName)`", error generated:
             `r$_
             `rTerminating the script"  # the "$_" is the current item/error
             exit 1
         }
 
-        $JobsData.Add($JobFileName, [System.Collections.ArrayList]::new())
+        $JobsData.Add($JobName, [System.Collections.ArrayList]::new())
 
         $CurrentLineNumber = 2 # Starting at 2 because line 1 contains the headers for the file
         foreach ($Line in $CSVImported) {
             if ("$($Line.Source + $Line.Destination)" -notin $SourceDestProcess) {
                 Write-Verbose "`tAdding the line ""$Line"""
-                $JobsData.$JobFileName += $Line
+                $JobsData.$JobName += $Line
                 $SourceDestProcess += $($Line.Source + $Line.Destination)
             }
             else {
-                Write-Host "Copy of a process was discovered in the file ""$JobFileName"" on line $CurrentLineNumber
+                Write-Host "Copy of a process was discovered in the file ""$JobName"" on line $CurrentLineNumber
                 `r`tSource: $($Line.Source)
                 `r`tDestination: $($Line.Destination)"
                 $DuplicatedProcesses = $true
@@ -190,7 +187,7 @@ The data that contains all the information about the job
 Assert-ValidDrivesAndPaths -Data $Data
 
 .NOTES
-(WIP) going to reword so it only process the drive letters and not have to go through all the job data
+(WIP) It works, but I am thinking about reworking it so it only process the drive letters and not have to go through all the job data
 #>
 function Assert-ValidDrivesAndPaths {
     [CmdletBinding()]
@@ -303,12 +300,12 @@ function Get-RequiredDrives {
 
     foreach ($Job in $JobsToProcess) {
         # If the information is queued to be processed
-        Write-Verbose "Processing file ""$($Job.FileName)"" for the process ""$($Job.JobOperation)"" with the content"
+        Write-Verbose "Processing file ""$($Job.Name)"" for the process ""$($Job.JobOperation)"" with the content"
         #this formatting found here https://www.itprotoday.com/powershell/powershell-basics-arrays-and-hash-tables#:~:text=Accessing%20Items%20in%20a%20Hash%20Table
-        foreach ($Entry in $JobsContent.($Job.FileName)) {
+        foreach ($Entry in $JobsContent.($Job.Name)) {
             Write-Verbose "`t$Entry"
         }
-        foreach ($Entry in $JobsContent.$($Job.FileName)) {
+        foreach ($Entry in $JobsContent.$($Job.Name)) {
             Write-Verbose "Processing paths ""$($Entry.Source)"" and ""$($Entry.Destination)"""
             $SourceDrive = ([string]$Entry.Source[0]).ToUpper() # Get the drive letter
             $DestDrive = ([string]$Entry.Destination[0]).ToUpper() # Get the drive letter
@@ -338,56 +335,108 @@ Return a unique list of source and destination combinations from the supplied da
 .DESCRIPTION
 This will read from the array of objects supplied and will pick out the unique source -> destination drive letters that the job will perform
 
-.PARAMETER SourceDestination
-An array of objects with the properties "Source" and "Destination" to read from
+.PARAMETER SourceDestinations
+An array of HashTables with the keys "Source" and "Destination" to read from
 
 .PARAMETER Restoring
 A switch to determine if the Source and Destination paths should be reversed because we are going to perform the restore operation on it
 
 .EXAMPLE
-$Data = @(
-    @{Source="C:"; Destination="D:"},
-    @{Source="C:"; Destination="E:"},
-    @{Source="C:"; Destination="F:"},
-    @{Source="G:"; Destination="H:"},
-    @{Source="C:"; Destination="I:"},
-    @{Source="J:"; Destination="K:"}
+$GameFiles = @(
+    @{Source="C:\Users"; Destination="D:\Users"},
+    @{Source="C:\Data"; Destination="E:\Data"},
+    @{Source="C:\Test"; Destination="F:\Test"},
+    @{Source="G:\five"; Destination="H:\five"},
+    @{Source="C:\file"; Destination="I:\file"},
+    @{Source="J:\tow"; Destination="K:\tow"}
 )
-$Results = Get-UniqueDriveToFrom -SourceDestination $Data -Restoring
+OR
+$GameSaves = @(
+    @{Source="D:\Users"; Destination="C:\Users:},
+    @{Source="E:\Data"; Destination="C:\Data:},
+    @{Source="F:\Test"; Destination="C:\Test:},
+    @{Source="H:\five"; Destination="G:\five:},
+    @{Source="I:\file"; Destination="C:\file:},
+    @{Source="K:\tow"; Destination"J:\tow"}
+)
+$Results = Get-UniqueDriveToFrom -SourceDestinations $GameFiles -Restoring
 # OR
-$Results = Get-UniqueDriveToFrom -SourceDestination $Data -Restoring:$true OR $false
+$Results = Get-UniqueDriveToFrom -SourceDestinations $GameFiles -Restoring:$true OR $false
 
 .NOTES
-(WIP) Need some priority logic to say, "If the source directory has more of the same drive letter then the destination side, use the source side as the 1->* connection.  However, it the destination directory has more of the same drive letter than the source, use the destinations side as the the 1->* connection".
+Returns an array of objects of the style @{Source = 'Char or Array'; Destination = 'Char or Array'} depending on if the Source or Destination has the least number of Drive letters, in which case that side is the char and the other is the Array.
 #>
 function Get-UniqueDriveToFrom {
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory, Position = 0)] [array] $SourceDestination,
+        [Parameter(Mandatory, Position = 0)] [array] $SourceDestinations,
         [Parameter()] [switch] $Restoring
     )
-
+    
     $ReturnArray = @() # Will contain an array of objects of the style @{Source = ...; Destination = ...}
+    
+    # Make a new array of PSCustomObjects that only contains the drive letters
+    # I can modify this so it is able to use remote/shared drives by replacing the [0] after the $_.(Source/Destination) with a regex matching command to match for one of the following conditions "DriveLetter:\" or "\\ipv4AddressORComputerName\FolderName" See your win-PE Semi-Auto imaging capturing utility for this regex command
+    $ExtractedDrivesUsed = $SourceDestinations | ForEach-Object { [pscustomobject]@{ SDrive = $_.Source[0]; DDrive = $_.Destination[0] } } | Sort-Object SDrive, DDrive
+    # Get the number of unique drive letters from both the source and destination drives and extract the number of unique items from them.  This is done by selecting only the unique (S/D)Drives and them measuring the object returned, and lastly selecting and expanding the property Count from the returned data
+    $UniqueSDrivesCount = $ExtractedDrivesUsed | Select-Object SDrive -Unique | Measure-Object | Select-Object -ExpandProperty Count
+    $UniqueDDrivesCount = $ExtractedDrivesUsed | Select-Object DDrive -Unique | Measure-Object | Select-Object -ExpandProperty Count
+    # This will determine if we compress the source or destination drives list
+    # More readable explanation: If the number of UNIQUE source drives is less than the number of UNIQUE destination drives, then we will compress the destination side into an array, otherwise it will compress the source side into an array
+    # For Example instead of getting the first item below, we get the second that is easier to read:
+    # 1. # of UNIQUE SDrives IS less than the # of UNIQUE DDrives
+    #   (C->X, C->Y, C->Z) we would get (C -> X, Y, Z) (Compress Destination)
+    # 2. # of UNIQUE SDrives IS NOT less than the # of UNIQUE DDrives
+    #   (X->C, Y->C, Z->C) we would get (X, Y, Z -> C) (Compress Source)
+    $DDriveCompress = if ($UniqueSDrivesCount -le $UniqueDDrivesCount -and -not $Restoring) { $true } else { $false }
+    Write-Verbose "Unique SDrive count($UniqueSDrivesCount) -le Unique DDrive count($UniqueDDrivesCount) -and -not Restoring($Restoring): $DDriveCompress"
 
-    foreach ($Entry in $SourceDestination) {
+    foreach ($Entry in $ExtractedDrivesUsed) {
         # If we are restoring what is after the ? is the source/destination, otherwise what is after the : is the source/destination
-        $SDrive = (-not $Restoring ? [string]$Entry.Source[0] : [string]$Entry.Destination[0] ).ToUpper()
-        $DDrive = (-not $Restoring ? [string]$Entry.Destination[0] : [string]$Entry.Source[0]).ToUpper()
-        if ($SDrive -notin $ReturnArray.Source) {
+        $SDrive = (-not $Restoring ? [string]$Entry.SDrive : [string]$Entry.DDrive).ToUpper()
+        $DDrive = (-not $Restoring ? [string]$Entry.DDrive : [string]$Entry.SDrive).ToUpper()
+        if ($DDriveCompress -and $SDrive -notin $ReturnArray.Source) {
             Write-Verbose "New source drive ""$SDrive"" detected, creating new object for it for the destination drive ""$DDrive""..."
-            # This has to be a PSCustomObject for the data to be more readable, it might work for the logic, however I don't know
+
             $ReturnArray += [PSCustomObject]@{
                 Source = $SDrive
                 Destination = @($DDrive)
             }
+
+            Write-Verbose "Entry created:
+            `r`tSource: $($ReturnArray[$ReturnArray.Count - 1].Source) Type: $($ReturnArray[$ReturnArray.Count - 1].Source.GetType().Name)
+            `r`tDestination: $($ReturnArray[$ReturnArray.Count - 1].Destination) Type: $($ReturnArray[$ReturnArray.Count - 1].Destination.GetType().BaseType)"
         }
-        elseif ($SDrive -in $ReturnArray.Source) {
-            Write-Verbose "A source drive ""$SDrive"" exists, appending to it for the destination drive ""$DDrive""..."
+        elseif (-not $DDriveCompress -and $DDrive -notin $ReturnArray.Destination) {
+            Write-Verbose "New destination drive ""$DDrive"" detected, creating new object for it for the source drive ""$SDrive""..."
+
+            $ReturnArray += [PSCustomObject]@{
+                Source = @($SDrive)
+                Destination = $DDrive
+            }
+
+            Write-Verbose "Entry created:
+            `r`tSource: $($ReturnArray[$ReturnArray.Count - 1].Source) Type: $($ReturnArray[$ReturnArray.Count - 1].Source.GetType().BaseType)
+            `r`tDestination: $($ReturnArray[$ReturnArray.Count - 1].Destination) Type: $($ReturnArray[$ReturnArray.Count - 1].Destination.GetType().Name)"
+        }
+        elseif ($DDriveCompress -and $SDrive -in $ReturnArray.Source -and $DDrive -notin $ReturnArray.Destination) {
             $ObjectReference = $ReturnArray | Where-Object Source -eq $SDrive
             $ObjectReference.Destination += $DDrive
+
+            Write-Verbose "Entry modified for a new destination drive:
+            `r`tSource: $($ObjectReference.Source)
+            `r`tDestination: $($ObjectReference.Destination -join ', ')"
+        }
+        elseif (-not $DDriveCompress -and $DDrive -in $ReturnArray.Destination -and $SDrive -notin $ReturnArray.Source) {
+            $ObjectReference = $ReturnArray | Where-Object Destination -eq $DDrive
+            $ObjectReference.Source += $SDrive
+
+            Write-Verbose "Entry modified for a new source drive:
+            `r`tSource: $($ObjectReference.Source -join ', ')
+            `r`tDestination: $($ObjectReference.Destination)"
         }
         else {
-            Write-Verbose "Un-processed entry $Entry"
+            Write-Verbose "Un-processed entry because the combination has been used before: $Entry"
         }
     }
 

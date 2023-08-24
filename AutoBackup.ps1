@@ -1,10 +1,10 @@
 ﻿# To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
 $VerbosePreference = "continue"
 #TODO:
-# Separate the contents of the variable $JobsData into two variables
-# 1 A variable that contains the file name as the key and the job operation as the value
-# 2 A variable that contains the file name as the key and the contents of the file as the value
-# See about pre-fetching the contents of the jobs at the start of the script
+# Separate the contents of the variable $JobsData into two variables (Done)
+# 1 A variable that contains the file name as the key and the job operation as the value (Done)
+# 2 A variable that contains the file name as the key and the contents of the file as the value (Done)
+# See about pre-fetching the contents of the jobs at the start of the script (Done)
 
 #region Library Importing
 Remove-Module Helper-Functions -Force -ErrorAction SilentlyContinue # This is added because an imported module is not removed unless you restart the powershell.  So if you modify the original file, the changes are not applied until it is removed and then re-imported
@@ -29,7 +29,7 @@ Explanation for this found here https://stackoverflow.com/questions/30590972/glo
 $MaxThreadsNumber = Get-MaxThreads
 $Global:UDThreadUsage = $Null
 $AvailableJobs = Get-AvailableJobs # an array of objects
-$JobsContent = Get-JobsContent $AvailableJobs # a hashtable of file names and file contents (which is an array of objects)
+$JobsContent = Get-JobsContent $AvailableJobs # a hashtable of file names and file contents (which is an array containing PSCustomObjects)
 $Global:JobCount = 0
 #endregion
 
@@ -155,13 +155,13 @@ function Select-Jobs {
         $ItemNumber = 1
         foreach ($Job in $AvailableJobs) {
             if ($Job.JobOperation -eq $Operation) {
-                Write-Host "[X] ($ItemNumber) $($Job.FileName)"
+                Write-Host "[X] ($ItemNumber) $($Job.Name)"
             }
             elseif ([String]::IsNullOrEmpty($Job.JobOperation)) {
-                Write-Host "[ ] ($ItemNumber) $($Job.FileName)"
+                Write-Host "[ ] ($ItemNumber) $($Job.Name)"
             }
             else {
-                Write-Host "[Locked] ($ItemNumber) $($Job.FileName)" -ForegroundColor DarkGray
+                Write-Host "[Locked] ($ItemNumber) $($Job.Name)" -ForegroundColor DarkGray
             }
             $ItemNumber += 1
         }
@@ -294,18 +294,19 @@ function Get-BackupDataScreen {
                 Write-Host "This script will $($Job.JobOperation) the following:"
                 $JobDescriber = $Job.JobOperation
             }
-            Write-Host "`t$($Job.FileName)"
-            # (WIP) Currently not showing the job, need to fix
-            foreach ($SourceDestination in $JobsContent.$($Job.FileName) | Select-Object Source, Destination) {
-                Write-Host $SourceDestination
-                $CopyFromTo = Get-UniqueDriveToFrom -SourceDestination $SourceDestination -Restoring:$($Job.JobOperation -eq $JobOperations.Restore)
-                # foreach ($Entry in $CopyFromTo) {
-                #     Write-Host "WIP"
-                # }
+            Write-Host "`t$($Job.Name)"
+
+            $SourceDestinations = $JobsContent.$($Job.Name) | Select-Object Source, Destination
+            $CopyFromTo = Get-UniqueDriveToFrom -SourceDestinations $SourceDestinations -Restoring:$($Job.JobOperation -eq $JobOperations.Restore)
+            foreach ($Entry in $CopyFromTo) {
+                # If the Destination is an array object, then make it more readable by adding a ', ' after every drive letter
+                if ($Entry.Destination -is [array]) {
+                    Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ' | Sort-Object)"
+                }
+                else {
+                    Write-Verbose "$($Entry.Source  -join ', '  | Sort-Object) -> $($Entry.Destination)"
+                }
             }
-            # foreach ($Entry in $JobsContent.$($Job.FileName)) {
-            #     Write-Verbose "$Entry"
-            # }
         }
 
         Write-Host "WARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder."
@@ -334,56 +335,6 @@ function Get-BackupDataScreen {
             }
         } while ($BackCharAnswer -notcontains $UserInput)
     }
-}
-
-function Get-DriveFromTo {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory, Position = 0)] [System.Collections.ArrayList] $JobEntries
-    )
-
-    Write-Verbose "Entering function Get-DriveFromTo"
-
-    $ReturnList = [System.Collections.ArrayList]::new()
-    $ProcessedDestinationDrives = [System.Collections.ArrayList]::new()
-    # If the supplied data is not 0 then initialize a starting object to be stored inside it
-    if ($JobEntries.size -ne 0) {
-        Write-Verbose "The job entries are not empty, adding starting object to ReturnList and adding the Destination drive to ProcessedDestinationDrives..."
-        $DestDrive = ([string]$JobEntries[0].Destination[0]).ToUpper()
-        $ReturnList.Add(
-            @{
-                Source = [System.Collections.ArrayList]::new()
-                Destination = $DestDrive
-            }
-        ) | Out-Null
-        $ProcessedDestinationDrives.Add($DestDrive) | Out-Null
-    }
-
-    # Formatted so that there will only be 1 destination drive, but that destination drive can be connected to multiple sources
-    foreach ($UEntry in $JobEntries) {
-        $SourceDrive = ([string]$UEntry.Source[0]).ToUpper()
-        $DestinationDrive = ([string]$UEntry.Destination[0]).ToUpper()
-        Write-Verbose "Processing entry with source of $SourceDrive and destination of $DestinationDrive"
-
-        foreach ($PEntry in $ReturnList) {
-            if ($PEntry.Destination -eq $DestinationDrive -and $PEntry.Source -notcontains $SourceDrive) {
-                Write-Verbose "New source drive ""$SourceDrive"" detected for drive ""$($PEntry.Destination)"""
-                $PEntry.Source.add($SourceDrive)
-            }
-            elseif ($ProcessedDestinationDrives -notcontains $DestinationDrive) {
-                $ReturnList.Add(
-                    @{
-                        Source = [System.Collections.ArrayList]::new()
-                        Destination = $DestinationDrive
-                    }
-                ) | Out-Null
-                $ProcessedDestinationDrives.Add($DestinationDrive) | Out-Null
-            }
-        }
-    }
-
-    Write-Verbose "Leaving function Get-DriveFromTo"
-    return $ReturnList
 }
 
 #region Perform backup
