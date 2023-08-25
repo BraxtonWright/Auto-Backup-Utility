@@ -377,7 +377,7 @@ function Get-UniqueDriveToFrom {
     
     # Make a new array of PSCustomObjects that only contains the drive letters
     # I can modify this so it is able to use remote/shared drives by replacing the [0] after the $_.(Source/Destination) with a regex matching command to match for one of the following conditions "DriveLetter:\" or "\\ipv4AddressORComputerName\FolderName" See your win-PE Semi-Auto imaging capturing utility for this regex command
-    $ExtractedDrivesUsed = $SourceDestinations | ForEach-Object { [pscustomobject]@{ SDrive = $_.Source[0]; DDrive = $_.Destination[0] } } | Sort-Object SDrive, DDrive
+    $ExtractedDrivesUsed = $SourceDestinations | ForEach-Object { [pscustomobject]@{ SDrive = $(if(-not $Restoring) {$_.Source[0]} else{$_.Destination[0]}); DDrive = $(if(-not $Restoring) {$_.Destination[0]} else{$_.Source[0]}) } } | Sort-Object SDrive, DDrive
     # Get the number of unique drive letters from both the source and destination drives and extract the number of unique items from them.  This is done by selecting only the unique (S/D)Drives and them measuring the object returned, and lastly selecting and expanding the property Count from the returned data
     $UniqueSDrivesCount = $ExtractedDrivesUsed | Select-Object SDrive -Unique | Measure-Object | Select-Object -ExpandProperty Count
     $UniqueDDrivesCount = $ExtractedDrivesUsed | Select-Object DDrive -Unique | Measure-Object | Select-Object -ExpandProperty Count
@@ -388,13 +388,13 @@ function Get-UniqueDriveToFrom {
     #   (C->X, C->Y, C->Z) we would get (C -> X, Y, Z) (Compress Destination)
     # 2. # of UNIQUE SDrives IS NOT less than the # of UNIQUE DDrives
     #   (X->C, Y->C, Z->C) we would get (X, Y, Z -> C) (Compress Source)
-    $DDriveCompress = if ($UniqueSDrivesCount -le $UniqueDDrivesCount -and -not $Restoring) { $true } else { $false }
-    Write-Verbose "Unique SDrive count($UniqueSDrivesCount) -le Unique DDrive count($UniqueDDrivesCount) -and -not Restoring($Restoring): $DDriveCompress"
+    $DDriveCompress = if ($UniqueSDrivesCount -le $UniqueDDrivesCount) { $true } else { $false }
+    Write-Verbose "Unique SDrive count($UniqueSDrivesCount) -le Unique DDrive count($UniqueDDrivesCount): $DDriveCompress"
 
     foreach ($Entry in $ExtractedDrivesUsed) {
         # If we are restoring what is after the ? is the source/destination, otherwise what is after the : is the source/destination
-        $SDrive = (-not $Restoring ? [string]$Entry.SDrive : [string]$Entry.DDrive).ToUpper()
-        $DDrive = (-not $Restoring ? [string]$Entry.DDrive : [string]$Entry.SDrive).ToUpper()
+        $SDrive = ([string]$Entry.SDrive).ToUpper()
+        $DDrive = ([string]$Entry.DDrive).ToUpper()
         if ($DDriveCompress -and $SDrive -notin $ReturnArray.Source) {
             Write-Verbose "New source drive ""$SDrive"" detected, creating new object for it for the destination drive ""$DDrive""..."
 

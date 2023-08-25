@@ -300,11 +300,22 @@ function Get-BackupDataScreen {
             $CopyFromTo = Get-UniqueDriveToFrom -SourceDestinations $SourceDestinations -Restoring:$($Job.JobOperation -eq $JobOperations.Restore)
             foreach ($Entry in $CopyFromTo) {
                 # If the Destination is an array object, then make it more readable by adding a ', ' after every drive letter
+                $Message = "`t`tCopying from the drive<1> <2> to the drive<3> <4>"
                 if ($Entry.Destination -is [array]) {
-                    Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ' | Sort-Object)"
+                    # Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ')"
+                    $Message = $Message.Replace('<1>', '')
+                    $Message = $Message.Replace('<2>', $($Entry.Source))
+                    $Message = $Message.Replace('<3>', $(if($Entry.Destination.Length -gt 1){'s'}else{''}))
+                    $Message = $Message.Replace('<4>', $($Entry.Destination -join ', '))
+                    Write-Host $Message
                 }
                 else {
-                    Write-Verbose "$($Entry.Source  -join ', '  | Sort-Object) -> $($Entry.Destination)"
+                    # Write-Verbose "$($Entry.Source  -join ', ') -> $($Entry.Destination)"
+                    $Message = $Message.Replace('<1>', $(if($Entry.Source.Length -gt 1){'s'}else{''}))
+                    $Message = $Message.Replace('<2>', $($Entry.Source -join ', '))
+                    $Message = $Message.Replace('<3>', '')
+                    $Message = $Message.Replace('<4>', $($Entry.Destination))
+                    Write-Host $Message
                 }
             }
         }
