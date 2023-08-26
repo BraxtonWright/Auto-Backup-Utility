@@ -1,10 +1,16 @@
-﻿# To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
-$VerbosePreference = "continue"
-#TODO:
-# Separate the contents of the variable $JobsData into two variables (Done)
-# 1 A variable that contains the file name as the key and the job operation as the value (Done)
-# 2 A variable that contains the file name as the key and the contents of the file as the value (Done)
-# See about pre-fetching the contents of the jobs at the start of the script (Done)
+﻿# This will prevent the script from running unless the user is running the script in at least powershell version 7.0 https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_requires?view=powershell-7.3#-version-nn
+#Requires -Version 7.0
+
+# To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
+# $VerbosePreference = "continue"
+
+
+<#
+ This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
+ However, it causes my Write-Progress to not work as it should.
+ So I have to manually set it to 'Classic' to get the old view back and have it work as it should.
+#>
+$PSStyle.Progress.View = "Classic"
 
 #region Library Importing
 Remove-Module Helper-Functions -Force -ErrorAction SilentlyContinue # This is added because an imported module is not removed unless you restart the powershell.  So if you modify the original file, the changes are not applied until it is removed and then re-imported
@@ -19,13 +25,13 @@ $YesCharAnswer = @('Y', 'y')
 $QuitCharAnswer = @('Q', 'q')
 $BackCharAnswer = @('B', 'b')
 $ClearCharAnswer = @('C', 'c')
-# the @{} defines a hashtable (which can be cast to a PSCustomObject by adding [PSCustomObject] in front of the @)
+# The variable $JobOperations is defined inside the file Helper-Functions.psm1 file because it used in both files and when we import the file into here, we get access the that variable, it will still work if you leave it here.
+# However, if you make use of the file else where, it will not work 
 $JobOperations = @{
     Backup  = "backup"
     Restore = "restore"
 }
-<# The $Global identifier is use so you can modify them inside the below functions because otherwise, you can't modify them.  The variable "AvailableJobs" works without it because Arrays, Collections, and Hash Tables are always passed/accessed by reference and "MaxThreadsNumber" is only read in the below functions.
-Explanation for this found here https://stackoverflow.com/questions/30590972/global-variable-changed-in-function-not-effective and here https://techgenix.com/powershell-global-variable #>
+# Explanation for this found here https://stackoverflow.com/questions/30590972/global-variable-changed-in-function-not-effective and here https://techgenix.com/powershell-global-variable #>
 $MaxThreadsNumber = Get-MaxThreads
 $Global:UDThreadUsage = $Null
 $AvailableJobs = Get-AvailableJobs # an array of objects
@@ -53,7 +59,7 @@ function Get-MainScreen {
     param ()
 
     do {
-        #Clear-Host
+        Clear-Host
 
         Write-Host "================================================================================
         `rWelcome to the RoboCopy backup script utility.  This script will back-up/restore
@@ -102,7 +108,7 @@ function Select-JobOperation {
     param ()
 
     do {
-        #Clear-Host
+        Clear-Host
 
         Write-Host "Here are a list of operations that this script can do.  Type the number for the operation to add/remove jobs to the operation.
         `r(1) Backup
@@ -147,7 +153,7 @@ function Select-Jobs {
         [Parameter(Mandatory, Position = 0)] [string] $Operation
     )
     do {
-        #Clear-Host
+        Clear-Host
 
         Write-Host "Here are a list of jobs that this script can do for the $Operation operation.  Type the number of the item to add/remove the job to the queue.
         `rNote:  Jobs marked as 'Locked' are because they are being used by the other operation defined."
@@ -208,7 +214,7 @@ function Get-UserDefinedThreads {
     $UserInput = $Null
     $FirstStartUp = $True
     do {
-        #Clear-Host
+        Clear-Host
 
         Write-Host "================================================================================
         `rHere you type a number between 1-$(if($MaxThreadsNumber -gt 128){128}else{$MaxThreadsNumber}) so this script can use that number of
@@ -222,17 +228,17 @@ function Get-UserDefinedThreads {
         Write-Host `n$(if([String]::IsNullOrEmpty($Global:UDThreadUsage)){"Currently using default thread count: 8"}else{"Currently using user defined thread count: $Global:UDThreadUsage"})`n
 
         #checks to see if the input is a integer
-        if (!$FirstStartUp -and ([String]::IsNullOrEmpty($UserInput) -or !($UserInput -as [int] -is [int]) -and ($UserInput -ne "b" -and $UserInput -ne "B" -and $UserInput -ne "c" -and $UserInput -ne "C"))) {
+        if (-not $FirstStartUp -and ([String]::IsNullOrEmpty($UserInput) -or -not ($UserInput -as [int] -is [int]) -and ($UserInput -ne "b" -and $UserInput -ne "B" -and $UserInput -ne "c" -and $UserInput -ne "C"))) {
             Write-Verbose "Failing Condition:"
             Write-Verbose "First startup: $FirstStartUp"
             Write-Verbose "Input is Null/Emtpy: $([String]::IsNullOrEmpty($UserInput))"
-            Write-Verbose "Input an integer: $(!($UserInput -as [int] -is [int]))"
-            Write-Verbose "Input is not 'b', 'B', or 'CLEAR': $(!($UserInput -eq "b" -or $UserInput -eq "B" -or $UserInput -eq "CLEAR"))"
+            Write-Verbose "Input an integer: $(-not ($UserInput -as [int] -is [int]))"
+            Write-Verbose "Input is not 'b', 'B', or 'CLEAR': $(-not ($UserInput -eq "b" -or $UserInput -eq "B" -or $UserInput -eq "CLEAR"))"
             
             Write-Host "ERROR:  Your input `"$UserInput`" is not an integer."
         }
         #checks to see if input (which is an integer) is between 1 and the maximum number of threads for the system or 128 (that max thread count that RoboCopy can handle)
-        elseif (!$FirstStartUp -and ($UserInput -as [int] -le 0 -or $UserInput -as [int] -gt $MaxThreadsNumber -or $UserInput -as [int] -gt 128)) {
+        elseif (-not $FirstStartUp -and ($UserInput -as [int] -le 0 -or $UserInput -as [int] -gt $MaxThreadsNumber -or $UserInput -as [int] -gt 128)) {
             Write-Host "ERROR:  " -NoNewline
             if ($UserInput -as [int] -gt 128) {
                 Write-Host "The max thread count that this script can handle is 128 threads."
@@ -246,7 +252,7 @@ function Get-UserDefinedThreads {
 
         $UserInput = Read-Host -Prompt "Number of threads, 'C'lear, or 'B'ack"
         $UserInputInt = $UserInput -as [int]
-    } while ((!($UserInputInt) -or ($UserInputInt -le 0 -or $UserInputInt -gt $MaxThreadsNumber -or $UserInputInt -gt 128)) -and ($BackCharAnswer -notcontains $UserInput -and $ClearCharAnswer -notcontains $UserInput))
+    } while ((-not ($UserInputInt) -or ($UserInputInt -le 0 -or $UserInputInt -gt $MaxThreadsNumber -or $UserInputInt -gt 128)) -and ($BackCharAnswer -notcontains $UserInput -and $ClearCharAnswer -notcontains $UserInput))
 
     if ($UserInput -as [int] -is [int]) {
         $Global:UDThreadUsage = [int]$UserInput
@@ -274,11 +280,26 @@ function Get-BackupDataScreen {
     [CmdletBinding()]
     param ()
 
-    $JobsToProcess = $AvailableJobs | Where-Object JobOperation -ne $Null | Sort-Object JobOperation, FileName # This only gets the jobs that have been queued and sorts first by the JobOperation then by the FileName
-    $RequiredDrives = Get-RequiredDrives -JobsToProcess $JobsToProcess -JobsContent $JobsContent
+    $JobsToProcess = $AvailableJobs | Where-Object JobOperation -ne $Null | Sort-Object JobOperation, Name # This only gets the jobs that have been queued and sorts first by the JobOperation then by the job's Name
+    $ExtractedJobData = @() # This will hold the array of Source and destination drives used check to see if they are connected or exists
+    foreach ($Job in $JobsToProcess) {
+        $ExtractedJobData += $JobsContent.$($Job.Name) | ForEach-Object {
+            [PSCustomObject]@{
+                JobName       = $Job.Name
+                JobOperation  = $Job.JobOperation
+                Source        = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
+                Destination   = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
+                Description   = $_.Description
+                FileExtension = $_.FileExtension
+            }
+        }
+    }
+
+    $RequiredDrives = Get-RequiredDrives -Paths $($ExtractedJobData | Select-Object Source, Destination)
+    Write-Verbose "RequiredDrives returned: $($RequiredDrives -join ', ')"
 
     do {
-        #Clear-Host
+        Clear-Host
         
         Write-Host "================================================================================
         `rYou are about to start the backup process for this script.  Please read the
@@ -286,7 +307,7 @@ function Get-BackupDataScreen {
         `r================================================================================`n"
 
         Write-Host "This script will require the following drives to be active before processing:
-        $($RequiredDrives -join ", ")`n"
+        `r`t$($RequiredDrives -join ", ")`n"
 
         $JobDescriber = ""
         foreach ($Job in $JobsToProcess) {
@@ -296,8 +317,8 @@ function Get-BackupDataScreen {
             }
             Write-Host "`t$($Job.Name)"
 
-            $SourceDestinations = $JobsContent.$($Job.Name) | Select-Object Source, Destination
-            $CopyFromTo = Get-UniqueDriveToFrom -SourceDestinations $SourceDestinations -Restoring:$($Job.JobOperation -eq $JobOperations.Restore)
+            # $SourceDestinations = $ExtractedJobData | Where-Object $_.JobName -eq $Job.Name | Select-Object Source, Destination
+            $CopyFromTo = Get-UniqueDriveToFrom -SourceDestinations $($ExtractedJobData | Where-Object JobName -eq $Job.Name | Select-Object Source, Destination)
             foreach ($Entry in $CopyFromTo) {
                 # If the Destination is an array object, then make it more readable by adding a ', ' after every drive letter
                 $Message = "`t`tCopying from the drive<1> <2> to the drive<3> <4>"
@@ -305,13 +326,13 @@ function Get-BackupDataScreen {
                     # Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ')"
                     $Message = $Message.Replace('<1>', '')
                     $Message = $Message.Replace('<2>', $($Entry.Source))
-                    $Message = $Message.Replace('<3>', $(if($Entry.Destination.Length -gt 1){'s'}else{''}))
+                    $Message = $Message.Replace('<3>', $(if ($Entry.Destination.Length -gt 1) { 's' }else { '' }))
                     $Message = $Message.Replace('<4>', $($Entry.Destination -join ', '))
                     Write-Host $Message
                 }
                 else {
                     # Write-Verbose "$($Entry.Source  -join ', ') -> $($Entry.Destination)"
-                    $Message = $Message.Replace('<1>', $(if($Entry.Source.Length -gt 1){'s'}else{''}))
+                    $Message = $Message.Replace('<1>', $(if ($Entry.Source.Length -gt 1) { 's' }else { '' }))
                     $Message = $Message.Replace('<2>', $($Entry.Source -join ', '))
                     $Message = $Message.Replace('<3>', '')
                     $Message = $Message.Replace('<4>', $($Entry.Destination))
@@ -320,7 +341,7 @@ function Get-BackupDataScreen {
             }
         }
 
-        Write-Host "WARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder."
+        Write-Host "`nWARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder."
 
         $UserInput = Read-Host -Prompt "Do you want to continue with the process 'Y'es or 'N'o"
 
@@ -331,14 +352,14 @@ function Get-BackupDataScreen {
     
     if ($YesCharAnswer.Contains($UserInput)) {
         do {
-            #Clear-Host
+            Clear-Host
 
-            $PathsAreValid = Assert-ValidDrivesAndPaths -Data $JobsData
-            Write-Verbose $JobsData
+            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $ExtractedJobData
+            $ExtractedJobData | ForEach-Object { Write-Verbose $_ }
             if ($PathsAreValid) {
                 #NEED TO SEE IF THERE IS A PERFORMANCE HIT USING THE TIME REMAINING FUNCTION
                 #use the Measure-Command cmdlet to achieve this
-                Start-Backup -JobsData $JobsData
+                Start-Backup -JobsData $ExtractedJobData
                 exit 1  #stop the program
             }
             else {
@@ -372,119 +393,122 @@ function Start-Backup {
         [Parameter(Mandatory, Position = 0)] [PSCustomObject] $JobsData
     )
     
-    #Clear-Host 
+    Clear-Host 
     
     Write-Host "Determining how many files are to be processed..."
-    #count the number of files inside each of the source directories    
-    foreach ($ProcessType in $JobsData.Keys) {
-        #for each 'backup' and 'restore' process
-        Write-Verbose "Processing $ProcessType"
-        foreach ($CurrentJob in $JobsData[$ProcessType].Keys) {
-            #for each 'job' to process
-            Write-Verbose "`tProcessing file $JobFileName"
-            foreach ($Entry in $JobsData.$ProcessType.$CurrentJob) {
-                #for each 'entry' inside the job, this formatting found here https://fercorrales.com/having-fun-with-nested-hash-tables-building-a-hard-coded-db/#:~:text=Let%27s%20see%20one,Enterprise
-                if ([String]::IsNullOrEmpty($entry.FileExtension)) {
-                    #it is a directory
-                    Write-Host "Counting the number of files in the directory `"$($Entry.Source)`"..."
-                    #attempted to multi-thread this using "Start-Job" and "Start-Threadjob", but can't get the jobs to return the number of files, it always returns 7 for some reason https://www.youtube.com/watch?v=8xqrdk5sYyE&ab_channel=MrAutomation
-                    $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value ((Get-ChildItem -Path $Entry.Source -file -force -recurse | Measure-Object).Count)  #"-file" means only get files, "-force" means find hidden/system files, and "-recurse" means go through all folders
-                }
-                else {
-                    #it is a file or set of files with a extension
-                    Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileExtension.Replace('/',", "))`"..."
+    # (WIP) I need it not only to count the number of files in the sources, but also the destinations and pick out the larger of the two, most likely going to use Start-ThreadJob to do so as documented here
+    # https://learn.microsoft.com/en-us/powershell/module/threadjob/start-threadjob?view=powershell-7.3
+    # https://www.saggiehaim.net/background-jobs-start-threadjob-vs-start-job/
+    # Count the number of files to be processed
+    foreach ($Entry in $JobsData) {
+        $SourceFileCount = 0
+        $DestinationFileCount = 0;
+        #it is a directory
+        if ([String]::IsNullOrEmpty($Entry.FileExtension)) {
+            Write-Host "Counting the number of files in the directories
+            `r`tSource: ""$($Entry.Source)""
+            `r`tDestination: ""$($Entry.Destination)"""
+            #attempted to multi-thread this using "Start-Job" and "Start-Threadjob", but can't get the jobs to return the number of files, it always returns 7 for some reason https://www.youtube.com/watch?v=8xqrdk5sYyE&ab_channel=MrAutomation
+            #"-File" means only get files, "-Force" means find hidden/system files, and "-Recurse" means go through all folders
+            $SourceFileCount = (Get-ChildItem -Path $Entry.Source -File -Force -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+            $DestinationFileCount = (Get-ChildItem -Path $Entry.Destination -file -force -recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+        }
+        #it is a file or set of files with a extension
+        else {
+            Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileExtension.Replace('/',", "))`"..."
 
-                    $FilesThatMatchRequirements = 0
-                    $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
+            $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
 
-                    foreach ($Item in Get-ChildItem -Path $entry.Source) {
-                        if (($Item.GetType().Name -eq "FileInfo") -and ($Item.mode -notmatch 'l') -and ($Item.name -match $AllowedFileTypes)) {
-                            #$Item has the supplied extension
-                            $FilesThatMatchRequirements++
-                        }
-                    }
-                    $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value $FilesThatMatchRequirements
+            foreach ($Item in Get-ChildItem -Path $entry.Source -File -Force -ErrorAction SilentlyContinue) {
+                # If the file has has the supplied extension
+                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
+                    $SourceFileCount++
                 }
-                $TotalFileCount += $($Entry.FileCount)
+            }
+            foreach ($Item in Get-ChildItem -Path $entry.Destination -File -Force -ErrorAction SilentlyContinue) {
+                # If the file has has the supplied extension
+                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
+                    $DestinationFileCount++
+                }
             }
         }
+        $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value ($SourceFileCount -gt $DestinationFileCount ? $SourceFileCount : $DestinationFileCount)
+
+        Write-Verbose "`tFile count discovered $SourceFileCount and $DestinationFileCount"
+        
+        $TotalFileCount += $($Entry.FileCount)
     }
+    
+    Clear-Host
 
-    #Clear-Host
-
-    Write-Verbose "`nTotal number of files to be processed =" $TotalFileCount
+    Write-Verbose "Total number of files to be processed: $TotalFileCount"
 
     $StartTime = Get-Date
 
-    foreach ($ProcessType in $JobsData.Keys) {
-        #for every 'process' backup/restore
-        foreach ($CurrentJob in $JobsData[$ProcessType].Keys) {
-            #for each 'job' to backup/restore
-            #region Robocopy parameters and what they do
-            # MIR = Mirror mode
-            # E = Copy subdirectories
-            # W = Wait time between fails
-            # R = Retry times
-            # NP  = Don't show progress percentage in log
-            # NDL = Don't log directory names
-            # NC  = Don't log file classes (existing, new file, etc.)
-            # BYTES = Show file sizes in bytes
-            # NJH = Do not display robocopy job header (JH)
-            # NJS = Do not display robocopy job summary (JS)
-            # TEE = Display log in stdout AND in target log file
-            
-            #$CommonRobocopyParams = '/MIR /NP /NDL /NC /BYTES /NJH /NJS';
-            #(/MIR) (/E) (/IS) (/NP) /NDL /NC /BYTES /NJH /NJS
-            #endregion
+    #region Robocopy parameters and what they do
+    # MIR = Mirror mode
+    # E = Copy subdirectories
+    # W = Wait time between fails
+    # R = Retry times
+    # NP  = Don't show progress percentage in log
+    # NDL = Don't log directory names
+    # NC  = Don't log file classes (existing, new file, etc.)
+    # BYTES = Show file sizes in bytes
+    # NJH = Do not display robocopy job header (JH)
+    # NJS = Do not display robocopy job summary (JS)
+    # TEE = Display log in stdout AND in target log file
 
-            #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-            $RoboCopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
-            $ProgressParams = @{
-                "BackUpDescriber"       = "temp"
-                "JobFileCount"          = "temp"
-                "TotalProcessFileCount" = $TotalFileCount
-                "FilesProcessed"        = 0
+    #$CommonRobocopyParams = '/MIR /NP /NDL /NC /BYTES /NJH /NJS';
+    #(/MIR) (/E) (/IS) (/NP) /NDL /NC /BYTES /NJH /NJS
+    #endregion
+
+    #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+    $RoboCopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
+    $ProgressParams = @{
+        "JobName"        = "TBD"
+        "JobFileCount"   = "TBD"
+        "TotalFileCount" = $TotalFileCount
+        "FilesProcessed" = 0
+    }
+    
+    # Start backing up\restoring the files
+    foreach ($Entry in $JobsData) {
+        Write-Verbose "$($Entry.JobName) : $($Entry | Select-Object Source, Destination)"
+
+        $ProgressParams.JobName = $Entry.JobName
+        $ProgressParams.JobFileCount = $Entry.FileCount
+
+        #it is a directory we are copying
+        if ([String]::IsNullOrEmpty($Entry.FileExtension)) {
+            if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $RoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
+            }
+            else {
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /mt:$Global:UDThreadUsage $RoboCopyParams'"
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /mt:$Global:UDThreadUsage @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
             }
 
-            #for each 'entry' inside the job, this formatting found here https://fercorrales.com/having-fun-with-nested-hash-tables-building-a-hard-coded-db/#:~:text=Let%27s%20see%20one,Enterprise
-            foreach ($Entry in $JobsData.$ProcessType.$CurrentJob) {
-                Write-Verbose "$JobFileName : $Entry"
+            $ProgressParams.FilesProcessed += $Entry.FileCount
+        }
+        # It is a set of files we are copying
+        else {
+            if (-not (Test-Path $Entry.Destination)) {
+                #the destination directory doesn't exist yet
+                New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
+            }
 
-                $ProgressParams["BackUpDescriber"] = $Entry.Description
-                $ProgressParams["JobFileCount"] = $Entry.FileCount
-
-                if ([String]::IsNullOrEmpty($entry.FileExtension)) {
-                    #it is a directory
-                    if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
-                        Write-Verbose "Robocopy `"$($Entry.Source)`" `"$($Entry.Destination)`""
-                        Robocopy "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
-                    }
-                    else {
-                        Write-Verbose "Robocopy `"$($Entry.Source)`" `"$($Entry.Destination)`" /mt:$Global:UDThreadUsage"
-                        Robocopy "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams /mt:$Global:UDThreadUsage | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
-                    }
-
-                    $ProgressParams["FilesProcessed"] += $Entry.FileCount
+            $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
+            foreach ($Item in Get-ChildItem -Path $Entry.Source) {
+                # If the file has has the supplied extension
+                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
+                    # Copy-ItemWithProgress -from "$($Entry.source+"\"+$Item.name)" -to $($Entry.Destination + "\" + $Item.name) @ProgressParams -StartTime $StartTime
+                    Write-Verbose "`tRunning the command 'Copy-Item ""$($Entry.Source+"\"+$Item.Name)"" -Destination ""$($Entry.Destination)""'"
+                    Copy-Item "$($Entry.Source+"\"+$Item.name)" -Destination "$($Entry.Destination)"
+                    $ProgressParams.FilesProcessed += 1
                 }
-                else {
-                    if (!(Test-Path $entry.Destination)) {
-                        #the destination directory doesn't exist yet
-                        New-Item $entry.Destination -ItemType Directory | Out-Null  #this format make is so it does't display the directories creation.  source https://stackoverflow.com/questions/46586382/hide-powershell-output
-                    }
-
-                    $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
-                    foreach ($Item in Get-ChildItem -Path $entry.Source) {
-                        if (($Item.GetType().Name -eq "FileInfo") -and ($Item.mode -notmatch 'l') -and ($Item.name -match $AllowedFileTypes)) {
-                            #$Item has the supplied extension
-                            Write-Verbose "Copy-Item "$($Entry.source + "\" + $Item.name)" -Destination $entry.destination"
-                            Copy-ItemWithProgress -from "$($Entry.source+"\"+$Item.name)" -to $($entry.destination + "\" + $Item.name) @ProgressParams -StartTime $StartTime
-                            $ProgressParams["FilesProcessed"] += 1
-                            #Copy-Item "$($Entry.source+"\"+$Item.name)" -destination $($entry.destination)
-                        }
-                    }
-                }
-            } 
-        }  
+            }
+        }
     }
 
     Write-Progress -Id 1 -Activity "temp" -Completed
@@ -496,18 +520,18 @@ function Start-Backup {
 Get the progress of the robocopy command
 
 .DESCRIPTION
-This will parse the data from the robocopy command to find out how much the file is copied
+This will parse the data from the robocopy command to find out how much the file is copied and will continue to do so until robocopy has finished processing the files
 
 .PARAMETER InputObject
 The data from the robocopy command that is piped into this function
 
-.PARAMETER BackUpDescriber
-What the job is doing.  Ex backing up or restoring
+.PARAMETER JobName
+The name of the job that is being processed
 
 .PARAMETER JobFileCount
 The number of files to be processed for the current job
 
-.PARAMETER TotalProcessFileCount
+.PARAMETER TotalFileCount
 The total number of files to be processed
 
 .PARAMETER FilesProcessed
@@ -517,19 +541,19 @@ The number of files that have been processed
 The datetime that the backup process has been initiated
 
 .EXAMPLE
-Robocopy "C:" "D:" /MIR /W:0 /R:1 | Get-RobocopyProgress -BackUpDescriber "Game files" -JobFileCount = 123 -TotalProcessFileCount 123 -FilesProcessed 0 -StartTime Get-Date
+Robocopy "C:" "D:" /MIR /W:0 /R:1 | Get-RobocopyProgress -JobName "Game files" -JobFileCount = 123 -TotalFileCount 123 -FilesProcessed 0 -StartTime Get-Date
 
 .NOTES
-(WIP) source for this function https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/
+(WIP) I might rename some of the variables to make it easier to know what they stand for and the source for this function was found here https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/h97skef/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
 #>
 function Get-RobocopyProgress {
     [CmdletBinding()]
     param
     (
         [Parameter(Mandatory, ValueFromPipeline)] $InputObject,
-        [Parameter(Mandatory, Position = 0)] [String] $BackUpDescriber,
+        [Parameter(Mandatory, Position = 0)] [String] $JobName,
         [Parameter(Mandatory, Position = 1)] [double] $JobFileCount,        
-        [Parameter(Mandatory, Position = 2)] [double] $TotalProcessFileCount,
+        [Parameter(Mandatory, Position = 2)] [double] $TotalFileCount,
         [Parameter(Mandatory, Position = 3)] [double] $FilesProcessed,
         [Parameter(Mandatory, Position = 4)] [datetime] $StartTime
     )
@@ -538,13 +562,13 @@ function Get-RobocopyProgress {
         #region RoboCopy variables
         [string]$FileName = " "
         [double]$FileCopyPercent = 0
-        [double]$FileSizeDouble = $Null
-        [double]$RoboCopyFilesLeft = $JobFileCount
-        [double]$RoboCopyCopiedFilesNumber = 0
+        [double]$FileSize = $Null
+        [double]$JobFilesLeft = $JobFileCount
+        [double]$JobFilesCopied = 0
         #endregion
         #region Overall progress variables
         [double]$OverallCopyPercent = 0
-        [double]$OverallFilesLeft = $TotalProcessFileCount - $FilesProcessed + 1
+        [double]$OverallFilesLeft = $TotalFileCount - $FilesProcessed + 1
         #endregion
     }
 
@@ -552,174 +576,74 @@ function Get-RobocopyProgress {
         #region Robocopy data parsing
         $data = $InputObject -split '\x09'  #the \x09 is the ASCII code for "Tab" Source https://buckwoody.wordpress.com/2017/01/18/data-wrangling-regular-expressions/
 
-        If (![String]::IsNullOrEmpty("$($data[4])")) {
-            #The file has been copied so get the name of file being copied and increment/de-increment the counting variables
-            $FileName = $data[4] -replace '.+\\(?=(?:.(?!\\))+$)'
-            $RoboCopyFilesLeft--
-            $RoboCopyCopiedFilesNumber++
+        #The file has been copied so get the name of file being copied and increment/de-increment the counting variables
+        If (-not [String]::IsNullOrEmpty("$($data[4])")) {
+            $FileName = $data[4] -replace '.+\\(?=(?:.(?!\\))+$)' # This Regex search command removes the folder path to the file only extracts the file's name from it
+            $JobFilesLeft--
+            $JobFilesCopied++
             $OverallFilesLeft--
         }
-        If (![String]::IsNullOrEmpty("$($data[0])")) {
-            #get the file's copy percent
+        #get the file's copy percent
+        If (-not [String]::IsNullOrEmpty("$($data[0])")) {
             $FileCopyPercent = ($data[0] -replace '%') -replace '\s'  #issue with this line because it occasionally receives a string and not a number?
         }
-        If (![String]::IsNullOrEmpty("$($data[3])")) {
-            #get the file's size
-            $FileSizeDouble = $data[3]  #issue with this line because it occasionally receives an empty string?
+        #get the file's size
+        If (-not [String]::IsNullOrEmpty("$($data[3])")) {
+            $FileSize = $data[3]  #issue with this line because it occasionally receives an empty string?
         }
-        [String]$FileSizeString = switch ($FileSizeDouble) {
-            #convert the double file size to it't most readable format
+        #convert the double file size to it't most readable format
+        [string]$FileSizeString = switch ($FileSize) {
             { $_ -gt 1TB -and $_ -lt 1024TB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1TB) + " TB")"
+                "$("{0:n2}" -f ($FileSize / 1TB) + " TB")"
             }
             { $_ -gt 1GB -and $_ -lt 1024GB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1GB) + " GB")"
+                "$("{0:n2}" -f ($FileSize / 1GB) + " GB")"
             }
             { $_ -gt 1MB -and $_ -lt 1024MB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1MB) + " MB")"
+                "$("{0:n2}" -f ($FileSize / 1MB) + " MB")"
             }
             { $_ -ge 1KB -and $_ -lt 1024KB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1KB) + " KB")"
+                "$("{0:n2}" -f ($FileSize / 1KB) + " KB")"
             }
             { $_ -lt 1KB } {
-                "$FileSizeDouble B"
+                "$FileSize B"
             }
         }
         #endregion
 
         #region Variables shared by the "Overall progress calculation" and "Estimated time remaining calculation" regions
-        $FilesProcessedNow = $FilesProcessed + $RoboCopyCopiedFilesNumber
+        $FilesProcessedNow = $FilesProcessed + $JobFilesCopied
         #endregion
 
         #region Overall progress calculation
-        $OverallCopyPercent = if ($FilesProcessedNow -gt 0) { ((($FilesProcessedNow - 1) / $TotalProcessFileCount) * 100).ToString("###.#") }else { 0 }
+        $OverallCopyPercent = if ($FilesProcessedNow -gt 0) { ((($FilesProcessedNow - 1) / $TotalFileCount) * 100).ToString("###.#") }else { 0 }
         #endregion
 
         #region Estimated time remaining calculation
-        $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -FilesProcessed $FilesProcessedNow -TotalNumberOfFiles $TotalProcessFileCount
+        $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -FilesProcessed $FilesProcessedNow -TotalFileCount $TotalFileCount
         #endregion
 
         #see if using 'n (new line in powershell) will add a line between the two write-process (place inside the CurrentOperation argument for the first write-progress)
         #see about implementing the estimated time remaining using something like the code described here https://chuvash.eu/2020/09/22/estimated-completion-in-write-progress-in-powershell/
-        $BackupProgressParameters = @{  #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+        #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+        $BackupProgressParameters = @{
             ID               = 0
             Activity         = "Generating backup"
-            Status           = "Percent Completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
+            Status           = "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
             PercentComplete  = $OverallCopyPercent
-            CurrentOperation = "Files Copied: $(($FilesProcessed + $RoboCopyCopiedFilesNumber - 1).ToString('N0'))     Files Left: $($OverallFilesLeft.ToString('N0'))"
+            CurrentOperation = "Files copied: $(($FilesProcessed + $JobFilesCopied - 1).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
         }
 
         $RoboCopyProgressParameters = @{
             ID               = 1
             ParentID         = 0
-            Activity         = "Currently Backing Up: $BackUpDescriber"
-            Status           = "Currently processing file: $FileName     File Size: $([string]::Format('{0:N0}', $FileSizeString))     Percent Completed: $FileCopyPercent%"
+            Activity         = "Currently backing up: $JobName"
+            Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
             PercentComplete  = $FileCopyPercent
-            CurrentOperation = "Copying: $($RoboCopyCopiedFilesNumber.ToString('N0')) of $($JobFileCount.toString('N0'))      Copied: $(($RoboCopyCopiedFilesNumber - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($RoboCopyFilesLeft.ToString('N0'))"
+            CurrentOperation = "Copied: $(($JobFilesCopied - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"  # Copying: $($JobFilesCopied.ToString('N0')) of $($JobFileCount.toString('N0'))
         }
 
-        Assert-Progress -OverallBackupProgressParameters $BackupProgressParameters -CurrentJobProgress $RoboCopyProgressParameters
-    }
-}
-
-#source for this function https://stackoverflow.com/questions/2434133/progress-during-large-file-copy-copy-item-write-progress
-# going to replace this function call with the command copy-item because what this does here doesn't truly copy the file, it reads the file and then makes a new file with the same exact content.
-function Copy-ItemWithProgress {
-    [CmdletBinding()]
-    param
-    (
-        [Parameter(Mandatory = $true)] [string] $from,
-        [Parameter(Mandatory = $true)] [string] $to,
-        [Parameter(Mandatory = $true)] [String] $BackUpDescriber,
-        [Parameter(Mandatory = $true)] [double] $JobFileCount,        
-        [Parameter(Mandatory = $true)] [double] $TotalProcessFileCount,
-        [Parameter(Mandatory = $true)] [double] $FilesProcessed,
-        [Parameter(Mandatory = $true)] [datetime] $StartTime
-    )
-    
-    begin {
-        $ffile = [io.file]::OpenRead($from)
-        $tofile = [io.file]::OpenWrite($to)
-
-        #region file copy variables
-        [string]$FileName = $from | Split-Path -Leaf  #gets the name of the file from the path
-        [double]$FileCopyPercent = 0
-        [double]$FileSizeDouble = (Get-Item $from).Length
-        [String]$FileSizeString = switch ($FileSizeDouble) {
-            #convert the double file size to it't most readable format
-            { $_ -gt 1TB -and $_ -lt 1024TB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1TB) + " TB")"
-            }
-            { $_ -gt 1GB -and $_ -lt 1024GB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1GB) + " GB")"
-            }
-            { $_ -gt 1MB -and $_ -lt 1024MB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1MB) + " MB")"
-            }
-            { $_ -ge 1KB -and $_ -lt 1024KB } {
-                "$("{0:n2}" -f ($FileSizeDouble / 1KB) + " KB")"
-            }
-            { $_ -lt 1KB } {
-                "$FileSizeDouble B"
-            }
-        }
-        [double]$JobFilesLeft = $JobFileCount
-        [double]$RoboCopyCopiedFilesNumber = 0
-        #endregion
-        #region Overall progress variables
-        [double]$OverallCopyPercent = 0
-        [double]$OverallFilesLeft = $TotalProcessFileCount - $FilesProcessed + 1
-        #endregion
-    }
-    
-    process {
-        try {
-            [byte[]]$buff = new-object byte[] 4096
-            [long]$total = [int]$count = 0
-            do {
-                $count = $ffile.Read($buff, 0, $buff.Length)
-                $tofile.Write($buff, 0, $count)
-                $total += $count
-                if ($total % 1mb -eq 0) {
-                    #region Variables shared by the "Overall progress calculation" and "Estimated time remaining calculation" regions
-                    $FilesProcessedNow = $FilesProcessed + $RoboCopyCopiedFilesNumber
-                    #endregion
-
-                    #region Overall progress calculation
-                    $OverallCopyPercent = if ($FilesProcessedNow -gt 0) { ((($FilesProcessedNow - 1) / $TotalProcessFileCount) * 100).ToString("###.#") }else { 0 }
-                    #endregion
-
-                    #region Estimated time remaining calculation
-                    $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -FilesProcessed $FilesProcessedNow -TotalNumberOfFiles $TotalProcessFileCount
-                    #endregion
-
-                    #see about implementing the estimated time remaining using something like the code described here https://chuvash.eu/2020/09/22/estimated-completion-in-write-progress-in-powershell/
-                    $BackupProgressParameters = @{  #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-                        ID               = 0
-                        Activity         = "Generating backup"
-                        Status           = "Percent Completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
-                        PercentComplete  = $OverallCopyPercent
-                        CurrentOperation = "Files Copied: $(($FilesProcessed + $RoboCopyCopiedFilesNumber - 1).ToString('N0'))     Files Left: $($OverallFilesLeft.ToString('N0'))"
-                    }
-            
-                    $CopyItemProgressParameters = @{
-                        ID               = 1
-                        ParentID         = 0
-                        Activity         = "Currently Backing Up: $BackUpDescriber"
-                        Status           = "Currently Copying file: $FileName     File Size: $([string]::Format('{0:N0}', $FileSizeString))     Percent Completed: $FileCopyPercent%"
-                        PercentComplete  = [long]($total * 100 / $ffile.Length)
-                        CurrentOperation = "Copying: $($RoboCopyCopiedFilesNumber.ToString('N0')) of $($JobFileCount.toString('N0'))      Copied: $(($RoboCopyCopiedFilesNumber - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"
-                    }
-                    
-                    Assert-Progress -OverallBackupProgressParameters $BackupProgressParameters -CurrentJobProgress $CopyItemProgressParameters
-                }
-            } while ($count -gt 0)
-        }
-        finally {
-            $ffile.Dispose()
-            $tofile.Dispose()
-            #Write-Progress -Activity "Copying file" -Status "Ready" -Completed
-        }
+        Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $RoboCopyProgressParameters
     }
 }
 
@@ -736,11 +660,11 @@ The start time of the process
 .PARAMETER FilesProcessed
 The number of files that have been processed
 
-.PARAMETER TotalNumberOfFiles
+.PARAMETER TotalFileCount
 The number of files in total for the process
 
 .EXAMPLE
-Get-TimeRemaining -StartTime Get-Date -FilesProcessed 5 -TotalNumberOfFiles 542
+Get-TimeRemaining -StartTime Get-Date -FilesProcessed 5 -TotalFileCount 542
 
 .NOTES
 (WIP) going to change the logic so instead of the average time to process a file, issue with skipping files because they haven't been changed\removed.  Instead, we will take the current time, start time, and process percent completed and run it through this formula "((CurrentTime – TimeStart) / DecimalOverallPercent) * (1 – DecimalOverallPercent)" to figure out the instantaneous time remaining.
@@ -752,7 +676,7 @@ function Get-TimeRemaining {
     (
         [Parameter(Mandatory = $true)] [datetime] $StartTime,
         [Parameter(Mandatory = $true)] [int] $FilesProcessed,
-        [Parameter(Mandatory = $true)] [int] $TotalNumberOfFiles
+        [Parameter(Mandatory = $true)] [int] $TotalFileCount
     )
 
     $Now = Get-Date
@@ -760,7 +684,7 @@ function Get-TimeRemaining {
     if ($FilesProcessed -gt 0) {
         $Elapsed = $Now - $StartTime #how long has the process been going on for
         $Average = $Elapsed.TotalSeconds / $FilesProcessed #average seconds per file
-        $TotalSecondsToGo = ($TotalNumberOfFiles - $FilesProcessed) * $Average #estimated seconds left to completion
+        $TotalSecondsToGo = ($TotalFileCount - $FilesProcessed) * $Average #estimated seconds left to completion
         Return New-TimeSpan -Seconds $TotalSecondsToGo #convert the variable "TotalSecondsToGo" to a timespan variable
     }
     else {
@@ -775,10 +699,10 @@ Display the progress to the user
 .DESCRIPTION
 This will take the argument objects as described below and write the progress to the screen
 
-.PARAMETER OverallBackupProgressParameters
+.PARAMETER OverallProgressParams
 The parameters required for Write-Progress to write out the progress for the overall progress
 
-.PARAMETER CurrentJobProgress
+.PARAMETER CurrentProgressParams
 The parameters required for Write-Progress to write out the progress for the current job
 
 .EXAMPLE
@@ -796,10 +720,10 @@ $CopyItemProgressParameters = @{
     Activity         = "Currently Backing Up: Game files"
     Status           = "Currently Copying file: SomeGameFile     File Size: $([string]::Format('{0:N0}', "1267891585"))     Percent Completed: .485%"
     PercentComplete  = .931
-    CurrentOperation = "Copying: $((189).ToString('N0')) of $((256).toString('N0'))      Copied: $((188).ToString('N0')) / $((256).toString('N0'))     Files Left: $((66).ToString('N0'))"
+    CurrentOperation = "Copied: $((188).ToString('N0')) / $((256).toString('N0'))     Files Left: $((66).ToString('N0'))"
 }
 
-Assert-Progress -OverallBackupProgressParameters $BackupProgressParameters -CurrentJobProgress $CopyItemProgressParameters
+Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $CopyItemProgressParameters
 .NOTES
 N.A.
 #>
@@ -807,15 +731,15 @@ function Assert-Progress {
     [CmdletBinding()]
     param
     (
-        [Parameter(Mandatory, Position = 0)] [Hashtable] $OverallBackupProgressParameters,
-        [Parameter(Mandatory, Position = 1)] [Hashtable] $CurrentJobProgress
+        [Parameter(Mandatory, Position = 0)] [Hashtable] $OverallProgressParams,
+        [Parameter(Mandatory, Position = 1)] [Hashtable] $CurrentProgressParams
     )
 
     $Host.PrivateData.ProgressBackgroundColor = 'Cyan' 
     $Host.PrivateData.ProgressForegroundColor = 'Black'
     
-    Write-Progress @OverallBackupProgressParameters
-    Write-Progress @CurrentJobProgress
+    Write-Progress @OverallProgressParams
+    Write-Progress @CurrentProgressParams
 }
 
 #region Main Code that jump starts the script
