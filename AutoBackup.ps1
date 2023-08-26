@@ -395,7 +395,7 @@ function Start-Backup {
     Clear-Host 
     
     Write-Host "Determining how many files are to be processed..."
-    # (WIP) I need it not only to count the number of files in the sources, but also the destinations and pick out the larger of the two, most likely going to use Start-ThreadJob to do so as documented here
+    # (WIP) I am most likely going to use Start-ThreadJob here as documented here
     # https://learn.microsoft.com/en-us/powershell/module/threadjob/start-threadjob?view=powershell-7.3
     # https://www.saggiehaim.net/background-jobs-start-threadjob-vs-start-job/
     # Count the number of files to be processed
@@ -622,7 +622,7 @@ function Get-RobocopyProgress {
         #endregion
 
         #region Estimated time remaining calculation
-        $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -FilesProcessed $FilesProcessedNow -TotalFileCount $TotalFileCount
+        $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -ProgressPercent $OverallCopyPercent
         #endregion
 
         #see if using 'n (new line in powershell) will add a line between the two write-process (place inside the CurrentOperation argument for the first write-progress)
@@ -659,35 +659,30 @@ This function will return the time remaining for the process to finish
 .PARAMETER StartTime
 The start time of the process
 
-.PARAMETER FilesProcessed
-The number of files that have been processed
-
-.PARAMETER TotalFileCount
-The number of files in total for the process
+.PARAMETER ProgressPercent
+The percent of the overall copy progress
 
 .EXAMPLE
-Get-TimeRemaining -StartTime Get-Date -FilesProcessed 5 -TotalFileCount 542
+Get-TimeRemaining -StartTime Get-Date -ProgressPercent 85.76
 
 .NOTES
-(WIP) going to change the logic so instead of the average time to process a file, issue with skipping files because they haven't been changed\removed.  Instead, we will take the current time, start time, and process percent completed and run it through this formula "((CurrentTime – TimeStart) / DecimalOverallPercent) * (1 – DecimalOverallPercent)" to figure out the instantaneous time remaining.
-Formula source https://social.msdn.microsoft.com/Forums/vstudio/en-US/5d847962-2e7c-4b3b-bccd-7492936bef33/how-could-i-create-an-estimated-time-remaining?forum=csharpgeneral
+Source for the process (either with the 3 up votes, they are copies of each other) https://social.msdn.microsoft.com/Forums/vstudio/en-US/5d847962-2e7c-4b3b-bccd-7492936bef33/how-could-i-create-an-estimated-time-remaining?forum=csharpgeneral with some modifications on my end.
 #>
 function Get-TimeRemaining {
     [CmdletBinding()]
     param
     (
-        [Parameter(Mandatory = $true)] [datetime] $StartTime,
-        [Parameter(Mandatory = $true)] [int] $FilesProcessed,
-        [Parameter(Mandatory = $true)] [int] $TotalFileCount
+        [Parameter(Mandatory, Position = 0)] [datetime] $StartTime,
+        [Parameter(Mandatory, Position = 1)] [double] $ProgressPercent
     )
 
-    $Now = Get-Date
-
-    if ($FilesProcessed -gt 0) {
-        $Elapsed = $Now - $StartTime #how long has the process been going on for
-        $Average = $Elapsed.TotalSeconds / $FilesProcessed #average seconds per file
-        $TotalSecondsToGo = ($TotalFileCount - $FilesProcessed) * $Average #estimated seconds left to completion
-        Return New-TimeSpan -Seconds $TotalSecondsToGo #convert the variable "TotalSecondsToGo" to a timespan variable
+    if ($ProgressPercent -gt 0) {
+        $TimeSpent = $(Get-Date) - $StartTime
+        $TimeRemainingInSeconds = [Math]::Ceiling($TimeSpent.TotalSeconds / $ProgressPercent * (100 - $ProgressPercent))
+        Write-Verbose "TimeSpent: $($TimeSpent.TotalSeconds)
+            `r`tProgressPercent: $ProgressPercent
+            `r`tTimeRemainingInSeconds: $TimeRemainingInSeconds"
+        Return New-TimeSpan -Seconds $TimeRemainingInSeconds #convert the variable "TimeRemainingInSeconds" to a timespan variable
     }
     else {
         Return "TBD"
