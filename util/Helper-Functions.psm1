@@ -366,9 +366,9 @@ function Assert-ValidDrivesAndPaths {
     foreach ($Entry in $PathsToProcess) {
         Write-Verbose "Processing ""$Entry"""
 
-        $SPath = $Entry.JobOperation -ne $JobOperations.Restore ? $Entry.Source : $Entry.Destination
-        $DPath = $Entry.JobOperation -ne $JobOperations.Restore ? $Entry.Destination : $Entry.Source
-        Write-Verbose "restoring: $($Entry.JobOperation -eq $JobOperations.Restore)
+        $SPath = $Entry.Source
+        $DPath = $Entry.Destination
+        Write-Verbose "JobOperation: $($Entry.JobOperation -eq $JobOperations.Restore)
         `r`tSource: $SPath
         `r`tDestination: $DPath"
 

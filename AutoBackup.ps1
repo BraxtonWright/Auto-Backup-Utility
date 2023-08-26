@@ -4,7 +4,6 @@
 # To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
 # $VerbosePreference = "continue"
 
-
 <#
  This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
  However, it causes my Write-Progress to not work as it should.
@@ -354,7 +353,7 @@ function Get-BackupDataScreen {
         do {
             Clear-Host
 
-            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $ExtractedJobData
+            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $($ExtractedJobData | Select-Object Source, Destination, JobOperation)
             $ExtractedJobData | ForEach-Object { Write-Verbose $_ }
             if ($PathsAreValid) {
                 #NEED TO SEE IF THERE IS A PERFORMANCE HIT USING THE TIME REMAINING FUNCTION
@@ -466,6 +465,7 @@ function Start-Backup {
     $RoboCopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
     $ProgressParams = @{
         "JobName"        = "TBD"
+        "JobOperation"   = "TBD"
         "JobFileCount"   = "TBD"
         "TotalFileCount" = $TotalFileCount
         "FilesProcessed" = 0
@@ -476,6 +476,7 @@ function Start-Backup {
         Write-Verbose "$($Entry.JobName) : $($Entry | Select-Object Source, Destination)"
 
         $ProgressParams.JobName = $Entry.JobName
+        $ProgressParams.JobOperation = $Entry.JobOperation
         $ProgressParams.JobFileCount = $Entry.FileCount
 
         #it is a directory we are copying
@@ -552,10 +553,11 @@ function Get-RobocopyProgress {
     (
         [Parameter(Mandatory, ValueFromPipeline)] $InputObject,
         [Parameter(Mandatory, Position = 0)] [String] $JobName,
-        [Parameter(Mandatory, Position = 1)] [double] $JobFileCount,        
-        [Parameter(Mandatory, Position = 2)] [double] $TotalFileCount,
-        [Parameter(Mandatory, Position = 3)] [double] $FilesProcessed,
-        [Parameter(Mandatory, Position = 4)] [datetime] $StartTime
+        [Parameter(Mandatory, Position = 1)] [String] $JobOperation,
+        [Parameter(Mandatory, Position = 2)] [double] $JobFileCount,        
+        [Parameter(Mandatory, Position = 3)] [double] $TotalFileCount,
+        [Parameter(Mandatory, Position = 4)] [double] $FilesProcessed,
+        [Parameter(Mandatory, Position = 5)] [datetime] $StartTime
     )
 
     begin {
@@ -628,7 +630,7 @@ function Get-RobocopyProgress {
         #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
         $BackupProgressParameters = @{
             ID               = 0
-            Activity         = "Generating backup"
+            Activity         = $JobOperation -eq $JobOperations.Backup ? "Generating backup" : "Restoring files"
             Status           = "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
             PercentComplete  = $OverallCopyPercent
             CurrentOperation = "Files copied: $(($FilesProcessed + $JobFilesCopied - 1).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
@@ -637,7 +639,7 @@ function Get-RobocopyProgress {
         $RoboCopyProgressParameters = @{
             ID               = 1
             ParentID         = 0
-            Activity         = "Currently backing up: $JobName"
+            Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: $JobName" : "Currently restoring: $JobName"
             Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
             PercentComplete  = $FileCopyPercent
             CurrentOperation = "Copied: $(($JobFilesCopied - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"  # Copying: $($JobFilesCopied.ToString('N0')) of $($JobFileCount.toString('N0'))
