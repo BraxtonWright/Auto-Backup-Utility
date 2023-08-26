@@ -284,11 +284,11 @@ function Get-BackupDataScreen {
     foreach ($Job in $JobsToProcess) {
         $ExtractedJobData += $JobsContent.$($Job.Name) | ForEach-Object {
             [PSCustomObject]@{
-                JobName       = $Job.Name
-                JobOperation  = $Job.JobOperation
-                Source        = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
-                Destination   = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
-                Description   = $_.Description
+                JobName      = $Job.Name
+                JobOperation = $Job.JobOperation
+                Source       = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
+                Destination  = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
+                Description  = $_.Description
                 FileMatching = $_.FileMatching
             }
         }
@@ -442,8 +442,6 @@ function Start-Backup {
 
     Write-Verbose "Total number of files to be processed: $TotalFileCount"
 
-    $StartTime = Get-Date
-
     #region Robocopy parameters and what they do
     # MIR = Mirror mode
     # E = Copy subdirectories
@@ -469,6 +467,7 @@ function Start-Backup {
         "JobFileCount"   = "TBD"
         "TotalFileCount" = $TotalFileCount
         "FilesProcessed" = 0
+        "StartTime"      = Get-Date
     }
     
     # Start backing up\restoring the files
@@ -483,11 +482,11 @@ function Start-Backup {
         if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
                 Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $RoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
             else {
                 Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /mt:$Global:UDThreadUsage $RoboCopyParams'"
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /mt:$Global:UDThreadUsage @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /mt:$Global:UDThreadUsage @RoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
 
             $ProgressParams.FilesProcessed += $Entry.FileCount

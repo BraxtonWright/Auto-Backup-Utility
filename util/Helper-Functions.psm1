@@ -256,7 +256,7 @@ function Get-UniqueDriveToFrom {
     
     # Make a new array of PSCustomObjects that only contains the drive letters
     # I can modify this so it is able to use remote/shared drives by replacing the [0] after the $_.(Source/Destination) with a regex matching command to match for one of the following conditions "DriveLetter:\" or "\\ipv4AddressORComputerName\FolderName" See your win-PE Semi-Auto imaging capturing utility for this regex command
-    $SourceDestinationDrives = $SourceDestinations | ForEach-Object { [pscustomobject]@{ SDrive = $_.Source[0]; DDrive = $_.Destination[0]} } | Sort-Object SDrive, DDrive
+    $SourceDestinationDrives = $SourceDestinations | ForEach-Object { [pscustomobject]@{ SDrive = $_.Source[0]; DDrive = $_.Destination[0] } } | Sort-Object SDrive, DDrive
 
     # Get the number of unique drive letters from both the source and destination drives and extract the number of unique items from them.  This is done by selecting only the unique (S/D)Drives and them measuring the object returned, and lastly selecting and expanding the property Count from the returned data
     $UniqueSDrivesCount = $SourceDestinationDrives | Select-Object SDrive -Unique | Measure-Object | Select-Object -ExpandProperty Count
