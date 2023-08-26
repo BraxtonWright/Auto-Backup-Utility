@@ -290,7 +290,7 @@ function Get-BackupDataScreen {
                 Source        = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
                 Destination   = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
                 Description   = $_.Description
-                FileExtension = $_.FileExtension
+                FileMatching = $_.FileMatching
             }
         }
     }
@@ -404,7 +404,7 @@ function Start-Backup {
         $SourceFileCount = 0
         $DestinationFileCount = 0;
         #it is a directory
-        if ([String]::IsNullOrEmpty($Entry.FileExtension)) {
+        if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             Write-Host "Counting the number of files in the directories
             `r`tSource: ""$($Entry.Source)""
             `r`tDestination: ""$($Entry.Destination)"""
@@ -415,9 +415,9 @@ function Start-Backup {
         }
         #it is a file or set of files with a extension
         else {
-            Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileExtension.Replace('/',", "))`"..."
+            Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileMatching.Replace('/',", "))`"..."
 
-            $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
+            $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
 
             foreach ($Item in Get-ChildItem -Path $entry.Source -File -Force -ErrorAction SilentlyContinue) {
                 # If the file has has the supplied extension
@@ -479,7 +479,7 @@ function Start-Backup {
         $ProgressParams.JobFileCount = $Entry.FileCount
 
         #it is a directory we are copying
-        if ([String]::IsNullOrEmpty($Entry.FileExtension)) {
+        if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
                 Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $RoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
                 Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams -StartTime $StartTime
@@ -498,7 +498,7 @@ function Start-Backup {
                 New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
             }
 
-            $AllowedFileTypes = $Entry.FileExtension.Replace('/', '|')
+            $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
             foreach ($Item in Get-ChildItem -Path $Entry.Source) {
                 # If the file has has the supplied extension
                 if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
