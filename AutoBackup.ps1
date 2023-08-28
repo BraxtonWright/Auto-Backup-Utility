@@ -2,7 +2,7 @@
 #Requires -Version 7.0
 
 # To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
-# $VerbosePreference = "continue"
+$VerbosePreference = "continue"
 
 <#
  This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
@@ -284,12 +284,12 @@ function Get-BackupDataScreen {
     foreach ($Job in $JobsToProcess) {
         $ExtractedJobData += $JobsContent.$($Job.Name) | ForEach-Object {
             [PSCustomObject]@{
-                JobName      = $Job.Name
-                JobOperation = $Job.JobOperation
-                Source       = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
-                Destination  = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
-                Description  = $_.Description
-                FileMatching = $_.FileMatching
+                JobName        = $Job.Name
+                JobOperation   = $Job.JobOperation
+                Source         = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
+                Destination    = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
+                JobDescription = $_.Description
+                FileMatching   = $_.FileMatching
             }
         }
     }
@@ -462,12 +462,13 @@ function Start-Backup {
     #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
     $RoboCopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
     $ProgressParams = @{
-        "JobName"        = "TBD"
-        "JobOperation"   = "TBD"
-        "JobFileCount"   = "TBD"
-        "TotalFileCount" = $TotalFileCount
-        "FilesProcessed" = 0
-        "StartTime"      = Get-Date
+        "JobName"             = "TBD"
+        "JobDescription"      = "TBD"
+        "JobOperation"        = "TBD"
+        "JobFileCount"        = "TBD"
+        "TotalFileCount"      = $TotalFileCount
+        "TotalFilesProcessed" = 0
+        "StartTime"           = Get-Date
     }
     
     # Start backing up\restoring the files
@@ -475,6 +476,7 @@ function Start-Backup {
         Write-Verbose "$($Entry.JobName) : $($Entry | Select-Object Source, Destination)"
 
         $ProgressParams.JobName = $Entry.JobName
+        $ProgressParams.JobDescription = $Entry.JobDescription
         $ProgressParams.JobOperation = $Entry.JobOperation
         $ProgressParams.JobFileCount = $Entry.FileCount
 
@@ -489,7 +491,7 @@ function Start-Backup {
                 Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /mt:$Global:UDThreadUsage @RoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
 
-            $ProgressParams.FilesProcessed += $Entry.FileCount
+            $ProgressParams.TotalFilesProcessed += $Entry.FileCount
         }
         # It is a set of files we are copying
         else {
@@ -499,13 +501,16 @@ function Start-Backup {
             }
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
+            $FilesCopied = 0
             foreach ($Item in Get-ChildItem -Path $Entry.Source) {
                 # If the file has has the supplied extension
                 if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
-                    # Copy-ItemWithProgress -from "$($Entry.source+"\"+$Item.name)" -to $($Entry.Destination + "\" + $Item.name) @ProgressParams -StartTime $StartTime
-                    Write-Verbose "`tRunning the command 'Copy-Item ""$($Entry.Source+"\"+$Item.Name)"" -Destination ""$($Entry.Destination)""'"
-                    Copy-Item "$($Entry.Source+"\"+$Item.name)" -Destination "$($Entry.Destination)"
-                    $ProgressParams.FilesProcessed += 1
+                    Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -from ""$($Entry.source + "\" + $Item.name)"" -to ""$($Entry.Destination + "\" + $Item.name)"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesCopied $FilesCopied'"
+                    Copy-ItemWithProgress -From "$($Entry.source + "\" + $Item.name)" -To "$($Entry.Destination + "\" + $Item.name)" @ProgressParams -FilesCopied $FilesCopied
+                    # Write-Verbose "`tRunning the command 'Copy-Item ""$($Entry.Source + "\" + $Item.Name)"" -Destination ""$($Entry.Destination)""'"
+                    # Copy-Item "$($Entry.Source + "\" + $Item.name)" -Destination "$($Entry.Destination)"
+                    $ProgressParams.TotalFilesProcessed += 1
+                    $FilesCopied += 1
                 }
             }
         }
@@ -528,14 +533,20 @@ The data from the robocopy command that is piped into this function
 .PARAMETER JobName
 The name of the job that is being processed
 
+.PARAMETER JobDescription
+The Describer for the current job, such as "Files steam uses to detect game files"
+
+.PARAMETER JobOperation
+The operation that the job will perform, "backup" or "restore"
+
 .PARAMETER JobFileCount
 The number of files to be processed for the current job
 
 .PARAMETER TotalFileCount
-The total number of files to be processed
+The total number of files to be processed for all jobs
 
-.PARAMETER FilesProcessed
-The number of files that have been processed
+.PARAMETER TotalFilesProcessed
+The total number of files that have been processed for all jobs
 
 .PARAMETER StartTime
 The datetime that the backup process has been initiated
@@ -544,7 +555,7 @@ The datetime that the backup process has been initiated
 Robocopy "C:" "D:" /MIR /W:0 /R:1 | Get-RobocopyProgress -JobName "Game files" -JobFileCount = 123 -TotalFileCount 123 -FilesProcessed 0 -StartTime Get-Date
 
 .NOTES
-(WIP) I might rename some of the variables to make it easier to know what they stand for and the source for this function was found here https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/h97skef/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
+source for this function was found here https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/h97skef/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
 #>
 function Get-RobocopyProgress {
     [CmdletBinding()]
@@ -552,11 +563,12 @@ function Get-RobocopyProgress {
     (
         [Parameter(Mandatory, ValueFromPipeline)] $InputObject,
         [Parameter(Mandatory, Position = 0)] [String] $JobName,
-        [Parameter(Mandatory, Position = 1)] [String] $JobOperation,
-        [Parameter(Mandatory, Position = 2)] [double] $JobFileCount,        
-        [Parameter(Mandatory, Position = 3)] [double] $TotalFileCount,
-        [Parameter(Mandatory, Position = 4)] [double] $FilesProcessed,
-        [Parameter(Mandatory, Position = 5)] [datetime] $StartTime
+        [Parameter(Mandatory, Position = 1)] [string] $JobDescription,
+        [Parameter(Mandatory, Position = 2)] [String] $JobOperation,
+        [Parameter(Mandatory, Position = 3)] [double] $JobFileCount,        
+        [Parameter(Mandatory, Position = 4)] [double] $TotalFileCount,
+        [Parameter(Mandatory, Position = 5)] [double] $TotalFilesProcessed,
+        [Parameter(Mandatory, Position = 6)] [datetime] $StartTime
     )
 
     begin {
@@ -569,7 +581,7 @@ function Get-RobocopyProgress {
         #endregion
         #region Overall progress variables
         [double]$OverallCopyPercent = 0
-        [double]$OverallFilesLeft = $TotalFileCount - $FilesProcessed + 1
+        [double]$OverallFilesLeft = $TotalFileCount - $TotalFilesProcessed + 1
         #endregion
     }
 
@@ -613,7 +625,7 @@ function Get-RobocopyProgress {
         #endregion
 
         #region Variables shared by the "Overall progress calculation" and "Estimated time remaining calculation" regions
-        $FilesProcessedNow = $FilesProcessed + $JobFilesCopied
+        $FilesProcessedNow = $TotalFilesProcessed + $JobFilesCopied
         #endregion
 
         #region Overall progress calculation
@@ -624,27 +636,185 @@ function Get-RobocopyProgress {
         $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -ProgressPercent $OverallCopyPercent
         #endregion
 
-        #see if using 'n (new line in powershell) will add a line between the two write-process (place inside the CurrentOperation argument for the first write-progress)
-        #see about implementing the estimated time remaining using something like the code described here https://chuvash.eu/2020/09/22/estimated-completion-in-write-progress-in-powershell/
         #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
         $BackupProgressParameters = @{
             ID               = 0
-            Activity         = $JobOperation -eq $JobOperations.Backup ? "Generating backup" : "Restoring files"
+            Activity         = $JobOperation -eq $JobOperations.Backup ? "Generating backup for the job ""$JobName""" : "Restoring files for the job ""$JobName"""
             Status           = "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
             PercentComplete  = $OverallCopyPercent
-            CurrentOperation = "Files copied: $(($FilesProcessed + $JobFilesCopied - 1).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
+            CurrentOperation = "Files copied: $(($TotalFilesProcessed + $JobFilesCopied - 1).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
         }
 
         $RoboCopyProgressParameters = @{
             ID               = 1
             ParentID         = 0
-            Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: $JobName" : "Currently restoring: $JobName"
+            Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$JobDescription""" : "Currently restoring: ""$JobDescription"""
             Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
             PercentComplete  = $FileCopyPercent
-            CurrentOperation = "Copied: $(($JobFilesCopied - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"  # Copying: $($JobFilesCopied.ToString('N0')) of $($JobFileCount.toString('N0'))
+            CurrentOperation = "Copied: $(($JobFilesCopied - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($($JobFilesLeft + 1).ToString('N0'))"
         }
 
         Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $RoboCopyProgressParameters
+    }
+}
+
+<#
+.SYNOPSIS
+Copy a single file from one location to another with a progress bar
+
+.DESCRIPTION
+This will copy a single file from one location to another while writing the progress to the user for the file being copied
+
+.PARAMETER From
+The Path to the file you wish to copy
+
+.PARAMETER To
+The destination folder you wish to copy the file to
+
+.PARAMETER JobName
+The name of the job that is being processed
+
+.PARAMETER JobDescription
+The Describer for the current job, such as "Files steam uses to detect game files"
+
+.PARAMETER JobOperation
+The operation that the job will perform, "backup" or "restore"
+
+.PARAMETER JobFileCount
+The number of files to be processed for the current job
+
+.PARAMETER TotalFileCount
+The total number of files to be processed for all jobs
+
+.PARAMETER TotalFilesProcessed
+The total number of files that have been processed for all jobs
+
+.PARAMETER StartTime
+The datetime that the backup process has been initiated
+
+.PARAMETER FilesCopied
+The total number of files that have been copied for the job's entry
+
+.EXAMPLE
+$ProgressParams = @{
+    "From"                = "D:\Steam\bin\cef\cef.win7x64\steamwebhelper.exe"
+    "To"                  = "C:\Steam\bin\cef\cef.win7x64\steamwebhelper.exe"
+    "JobName"             = "Steam web helper"
+    "JobDescription"      = "Steam Web helper file"
+    "JobOperation"        = "backup"
+    "JobFileCount"        = 1
+    "TotalFileCount"      = 1
+    "TotalFilesProcessed" = 0
+    "StartTime"           = Get-Date
+    "FilesCopied"         = 0
+}
+
+Copy-ItemWithProgress @ProgressParams
+
+.NOTES
+(WIP) Need to add some logic to determine if the file has been modified and thus it needs to be re-copied
+This can be done by looking at the meta-data of the file and looking specifically at the Size and Modified properties.
+https://evotec.xyz/getting-file-metadata-with-powershell-similar-to-what-windows-explorer-provides/
+These two properties are what RoboCopy uses to determine if a file has changed
+https://www.google.com/search?q=How+does+robocopy+know+that+a+file+been+modified%3F&oq=How+does+robocopy+know+that+a+file+been+modified%3F&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIKCAEQIRigARjDBNIBCTIxODY2ajFqN6gCALACAA&client=ms-android-samsung-rvo1&sourceid=chrome-mobile&ie=UTF-8
+If one of the two properties has change, then replace the file.
+Source for the start of this function https://stackoverflow.com/a/2436119
+#>
+function Copy-ItemWithProgress {
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory, Position = 0)] [string] $From,
+        [Parameter(Mandatory, Position = 1)] [string] $To,
+        [Parameter(Mandatory, Position = 2)] [string] $JobName,
+        [Parameter(Mandatory, Position = 3)] [string] $JobDescription,
+        [Parameter(Mandatory, Position = 4)] [String] $JobOperation,
+        [Parameter(Mandatory, Position = 5)] [double] $JobFileCount,        
+        [Parameter(Mandatory, Position = 6)] [double] $TotalFileCount,
+        [Parameter(Mandatory, Position = 7)] [double] $TotalFilesProcessed,
+        [Parameter(Mandatory, Position = 8)] [datetime] $StartTime,
+        [Parameter(Mandatory, Position = 9)] [double] $FilesCopied
+    )
+
+    begin {
+        $ffile = [io.file]::OpenRead($From)
+        $tofile = [io.file]::OpenWrite($To)
+
+        #region file copy variables
+        [string]$FileName = $From | Split-Path -Leaf  #gets the name of the file from the path
+        [double]$FileCopyPercent = 0
+        [double]$FileSize = (Get-Item $From).Length
+        [string]$FileSizeString = switch ($FileSize) {
+            #convert the double file size to it't most readable format
+            { $_ -gt 1TB -and $_ -lt 1024TB } {
+                "$("{0:n2}" -f ($FileSize / 1TB) + " TB")"
+            }
+            { $_ -gt 1GB -and $_ -lt 1024GB } {
+                "$("{0:n2}" -f ($FileSize / 1GB) + " GB")"
+            }
+            { $_ -gt 1MB -and $_ -lt 1024MB } {
+                "$("{0:n2}" -f ($FileSize / 1MB) + " MB")"
+            }
+            { $_ -ge 1KB -and $_ -lt 1024KB } {
+                "$("{0:n2}" -f ($FileSize / 1KB) + " KB")"
+            }
+            { $_ -lt 1KB } {
+                "$FileSize B"
+            }
+        }
+        [double]$JobFilesLeft = $JobFileCount - $FilesCopied
+        #endregion
+        #region Overall progress variables
+        [double]$OverallCopyPercent = 0
+        [double]$OverallFilesLeft = $TotalFileCount - $TotalFilesProcessed
+        #endregion
+    }
+
+    process {
+        try {
+            [byte[]]$buff = new-object byte[] 4096
+            [long]$total = [int]$count = 0
+            do {
+                $count = $ffile.Read($buff, 0, $buff.Length)
+                $tofile.Write($buff, 0, $count)
+                $total += $count
+                if ($total % 1mb -eq 0) {
+                    #region Progress calculation
+                    $OverallCopyPercent = if ($TotalFilesProcessed -gt 0) { ((($TotalFilesProcessed - 1) / $TotalFileCount) * 100).ToString("###.#") } else { 0 }
+                    $FileCopyPercent = if ($total -gt 0) { (($total / $FileSize) * 100).ToString('###.#') } else { 0 }
+                    #endregion
+
+                    #region Estimated time remaining calculation
+                    $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -ProgressPercent $OverallCopyPercent
+                    #endregion
+
+                    #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+                    $BackupProgressParameters = @{
+                        ID               = 0
+                        Activity         = $JobOperation -eq $JobOperations.Backup ? "Generating backup for the job ""$JobName""" : "Restoring files for the job ""$JobName"""
+                        Status           = "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
+                        PercentComplete  = $OverallCopyPercent
+                        CurrentOperation = "Files copied: $(($TotalFilesProcessed).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
+                    }
+
+                    $CopyProgressParameters = @{
+                        ID               = 1
+                        ParentID         = 0
+                        Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$JobDescription""" : "Currently restoring: ""$JobDescription"""
+                        Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
+                        PercentComplete  = $FileCopyPercent
+                        CurrentOperation = "Copied: $(($FilesCopied).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"
+                    }
+
+                    Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $CopyProgressParameters
+                }
+            } while ($count -gt 0)
+        }
+        finally {
+            $ffile.Dispose()
+            $tofile.Dispose()
+            #Write-Progress -Activity "Copying file" -Status "Ready" -Completed
+        }
     }
 }
 
@@ -678,9 +848,9 @@ function Get-TimeRemaining {
     if ($ProgressPercent -gt 0) {
         $TimeSpent = $(Get-Date) - $StartTime
         $TimeRemainingInSeconds = [Math]::Ceiling($TimeSpent.TotalSeconds / $ProgressPercent * (100 - $ProgressPercent))
-        Write-Verbose "TimeSpent: $($TimeSpent.TotalSeconds)
+        <#Write-Verbose "TimeSpent: $($TimeSpent.TotalSeconds)
             `r`tProgressPercent: $ProgressPercent
-            `r`tTimeRemainingInSeconds: $TimeRemainingInSeconds"
+            `r`tTimeRemainingInSeconds: $TimeRemainingInSeconds"#>
         Return New-TimeSpan -Seconds $TimeRemainingInSeconds #convert the variable "TimeRemainingInSeconds" to a timespan variable
     }
     else {
