@@ -2,21 +2,13 @@
 #Requires -Version 7.0
 
 # To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
-$VerbosePreference = "continue"
-
-<#
- This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
- However, it causes my Write-Progress to not work as it should.
- So I have to manually set it to 'Classic' to get the old view back and have it work as it should.
-#>
-$PSStyle.Progress.View = "Classic"
+# $VerbosePreference = "continue"
 
 #region Library Importing
-Remove-Module Helper-Functions -Force -ErrorAction SilentlyContinue # This is added because an imported module is not removed unless you restart the powershell.  So if you modify the original file, the changes are not applied until it is removed and then re-imported
 Import-Module -DisableNameChecking $PSScriptRoot\util\Helper-Functions.psm1
 #endregion
 
-#region Global variables used
+#region Global variables used / Pre-configuring
 # the @() defines an array
 $YesNoCharAnswer = @('Y', 'y', 'N', 'n')
 $NoCharAnswer = @('N', 'n')
@@ -24,18 +16,25 @@ $YesCharAnswer = @('Y', 'y')
 $QuitCharAnswer = @('Q', 'q')
 $BackCharAnswer = @('B', 'b')
 $ClearCharAnswer = @('C', 'c')
-# The variable $JobOperations is defined inside the file Helper-Functions.psm1 file because it used in both files and when we import the file into here, we get access the that variable, it will still work if you leave it here.
-# However, if you make use of the file else where, it will not work 
+# The below variable is also used inside the file Helper-Functions.psm1.  However, for some reason that file pulls this variable into itself so you can use it there as well?
 $JobOperations = @{
     Backup  = "backup"
     Restore = "restore"
 }
-# Explanation for this found here https://stackoverflow.com/questions/30590972/global-variable-changed-in-function-not-effective and here https://techgenix.com/powershell-global-variable #>
+# The reason for having $Global in front of some variables are not in others is because those that have this identifier can be modified inside function calls.  Explanation for this found here https://stackoverflow.com/questions/30590972/global-variable-changed-in-function-not-effective and here https://techgenix.com/powershell-global-variable
 $MaxThreadsNumber = Get-MaxThreads
 $Global:UDThreadUsage = $Null
+Write-Host "Getting all available jobs from the ""Jobs"" folder..."
 $AvailableJobs = Get-AvailableJobs # an array of objects
 $JobsContent = Get-JobsContent $AvailableJobs # a hashtable of file names and file contents (which is an array containing PSCustomObjects)
 $Global:JobCount = 0
+
+<#
+ This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
+ However, it causes my Write-Progress to not work as it should.
+ So I have to manually set it to 'Classic' to get the old view back and have it work as it should.
+#>
+$PSStyle.Progress.View = "Classic"
 #endregion
 
 #region Screen Functions
@@ -87,6 +86,8 @@ function Get-MainScreen {
             }
         }
     } While ($QuitCharAnswer -notcontains $UserInput)
+
+    Clear-Host
 }
 
 <#
@@ -322,7 +323,7 @@ function Get-BackupDataScreen {
                 # If the Destination is an array object, then make it more readable by adding a ', ' after every drive letter
                 $Message = "`t`tCopying from the drive<1> <2> to the drive<3> <4>"
                 if ($Entry.Destination -is [array]) {
-                    # Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ')"
+                    Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ')"
                     $Message = $Message.Replace('<1>', '')
                     $Message = $Message.Replace('<2>', $($Entry.Source))
                     $Message = $Message.Replace('<3>', $(if ($Entry.Destination.Length -gt 1) { 's' }else { '' }))
@@ -330,7 +331,7 @@ function Get-BackupDataScreen {
                     Write-Host $Message
                 }
                 else {
-                    # Write-Verbose "$($Entry.Source  -join ', ') -> $($Entry.Destination)"
+                    Write-Verbose "$($Entry.Source  -join ', ') -> $($Entry.Destination)"
                     $Message = $Message.Replace('<1>', $(if ($Entry.Source.Length -gt 1) { 's' }else { '' }))
                     $Message = $Message.Replace('<2>', $($Entry.Source -join ', '))
                     $Message = $Message.Replace('<3>', '')
@@ -367,6 +368,7 @@ function Get-BackupDataScreen {
         } while ($BackCharAnswer -notcontains $UserInput)
     }
 }
+#endregion
 
 #region Perform backup
 <#
@@ -418,18 +420,12 @@ function Start-Backup {
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
 
-            foreach ($Item in Get-ChildItem -Path $entry.Source -File -Force -ErrorAction SilentlyContinue) {
-                # If the file has has the supplied extension
-                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
-                    $SourceFileCount++
-                }
-            }
-            foreach ($Item in Get-ChildItem -Path $entry.Destination -File -Force -ErrorAction SilentlyContinue) {
-                # If the file has has the supplied extension
-                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
-                    $DestinationFileCount++
-                }
-            }
+            $SourceFileCount = (Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } |
+                Measure-Object).Count
+            # We don't count the number of files in the destination directory because of this issue with it.  If the number of files in the Destination folder are greater than those in the source but they are all or mostly different to what is in the source, then when we go to copy the new/modified files, we will never get 100% for the job or the overall progress.
+            # This is because lets say that a job has 7 files in the source and 15 in the destination that are all different to the source, then the number of files processed will be at best 7 / 15 because we only count the number of files processed that are copied from the source to the destination.
+            $DestinationFileCount = 0
         }
         $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value ($SourceFileCount -gt $DestinationFileCount ? $SourceFileCount : $DestinationFileCount)
 
@@ -495,23 +491,44 @@ function Start-Backup {
         }
         # It is a set of files we are copying
         else {
+            #the destination directory doesn't exist yet
             if (-not (Test-Path $Entry.Destination)) {
-                #the destination directory doesn't exist yet
                 New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
             }
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
-            $FilesCopied = 0
-            foreach ($Item in Get-ChildItem -Path $Entry.Source) {
-                # If the file has has the supplied extension
-                if (($Item.GetType().Name -eq "FileInfo") -and ($Item.Mode -notmatch 'l') -and ($Item.Name -match $AllowedFileTypes)) {
-                    Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -from ""$($Entry.source + "\" + $Item.name)"" -to ""$($Entry.Destination + "\" + $Item.name)"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesCopied $FilesCopied'"
-                    Copy-ItemWithProgress -From "$($Entry.source + "\" + $Item.name)" -To "$($Entry.Destination + "\" + $Item.name)" @ProgressParams -FilesCopied $FilesCopied
-                    # Write-Verbose "`tRunning the command 'Copy-Item ""$($Entry.Source + "\" + $Item.Name)"" -Destination ""$($Entry.Destination)""'"
-                    # Copy-Item "$($Entry.Source + "\" + $Item.name)" -Destination "$($Entry.Destination)"
-                    $ProgressParams.TotalFilesProcessed += 1
-                    $FilesCopied += 1
+            # I would have liked to have the logic for filtering all in one variable, however we have to check the Destination files differently compared to the Source files so they have to be different.  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
+            $SourceFiles = Get-ChildItem -Path $Entry.Source |
+            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } # Here we filter the results so we only get the files that we want to copy by using the variable AllowedFileTypes
+            $DestinationFiles = Get-ChildItem -Path $Entry.Destination |
+            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # We don't filter the files out using AllowedFileTypes because we have to get all the files to check to see if they are in the source folder.
+
+            $FilesProcessed = 0
+            # Loop through every entry inside the destination files, and if the file's name doesn't exist in the source, then delete the file.
+            foreach ($Item in $DestinationFiles) {
+                if ($Item.Name -notin $SourceFiles.Name) {
+                    Write-Verbose "`tRemoving the file located here ""$($Item.FullName)"" because it doesn't exist in the source files"
+                    Remove-Item -Path $Item.FullName
                 }
+            }
+
+            foreach ($Item in $SourceFiles) {
+                # extract the file size and last write time from the file to determine if the file has change
+                $SMetaData = Get-Item $Item.FullName | Select-Object Length, LastWriteTime
+                $DMetaData = $DestinationFiles | Where-Object { $_.Name -eq $Item.Name } | Select-Object Length, LastWriteTime
+                #If one of the two properties has changed, then overwrite the destination file with the new file.
+                if ($SMetaData.Length -ne $DMetaData.Length -or $SMetaData.LastWriteTime -ne $DMetaData.LastWriteTime) {
+                    Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -From ""$($Item.FullName)"" -To ""$($Entry.Destination + "\" + $Item.Name)"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesProcessed $FilesProcessed'"
+                    Copy-ItemWithProgress -From "$($Item.FullName)" -To "$($Entry.Destination + "\" + $Item.Name)" @ProgressParams -FilesProcessed $FilesProcessed
+                    # Now change the metadata of the file to make it match the Source file.  We do this because when we call Copy-ItemWithProgress on the source file, we then create a NEW file with the same content.  So it's metadata would be unsurprisingly be different.  Making a new file with the same content doesn't act like a copy and paste, those two keep most of the metadata intact.
+                    Set-MetaDataToMatchSource -SourceFilePath $Item.FullName -DestinationFilePath $($Entry.Destination + "\" + $Item.Name)
+                }
+                else {
+                    Write-Verbose "`tSkipping the file located here ""$($Item.FullName)"" because it hasn't changed"
+                }
+
+                $ProgressParams.TotalFilesProcessed += 1
+                $FilesProcessed += 1
             }
         }
     }
@@ -692,8 +709,8 @@ The total number of files that have been processed for all jobs
 .PARAMETER StartTime
 The datetime that the backup process has been initiated
 
-.PARAMETER FilesCopied
-The total number of files that have been copied for the job's entry
+.PARAMETER FilesProcessed
+The total number of files that have been processed for the job's entry
 
 .EXAMPLE
 $ProgressParams = @{
@@ -706,7 +723,7 @@ $ProgressParams = @{
     "TotalFileCount"      = 1
     "TotalFilesProcessed" = 0
     "StartTime"           = Get-Date
-    "FilesCopied"         = 0
+    "FilesProcessed"         = 0
 }
 
 Copy-ItemWithProgress @ProgressParams
@@ -733,7 +750,7 @@ function Copy-ItemWithProgress {
         [Parameter(Mandatory, Position = 6)] [double] $TotalFileCount,
         [Parameter(Mandatory, Position = 7)] [double] $TotalFilesProcessed,
         [Parameter(Mandatory, Position = 8)] [datetime] $StartTime,
-        [Parameter(Mandatory, Position = 9)] [double] $FilesCopied
+        [Parameter(Mandatory, Position = 9)] [double] $FilesProcessed
     )
 
     begin {
@@ -762,7 +779,7 @@ function Copy-ItemWithProgress {
                 "$FileSize B"
             }
         }
-        [double]$JobFilesLeft = $JobFileCount - $FilesCopied
+        [double]$JobFilesLeft = $JobFileCount - $FilesProcessed
         #endregion
         #region Overall progress variables
         [double]$OverallCopyPercent = 0
@@ -803,7 +820,7 @@ function Copy-ItemWithProgress {
                         Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$JobDescription""" : "Currently restoring: ""$JobDescription"""
                         Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
                         PercentComplete  = $FileCopyPercent
-                        CurrentOperation = "Copied: $(($FilesCopied).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"
+                        CurrentOperation = "Copied: $(($FilesProcessed).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"
                     }
 
                     Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $CopyProgressParameters
@@ -907,6 +924,7 @@ function Assert-Progress {
     Write-Progress @OverallProgressParams
     Write-Progress @CurrentProgressParams
 }
+#endregion
 
 #region Main Code that jump starts the script
 Get-MainScreen

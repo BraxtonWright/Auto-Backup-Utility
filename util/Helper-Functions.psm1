@@ -1,14 +1,7 @@
 <#
-Only put in the functions that are completed in here because the Write-Verbose command will not be accepted here
-The variable $JobOperations is stored inside the AutoBackup.ps1 file
+Only put in the functions that are completed in here because the Write-Verbose command will not be accepted here unless you uncomment out the the line "$VerbosePreference = 'Continue'" in this file
 #>
 #$VerbosePreference = 'Continue'
-
-# the @{} defines a hashtable (which can be cast to a PSCustomObject by adding [PSCustomObject] in front of the @)
-$JobOperations = @{
-    Backup  = "backup"
-    Restore = "restore"
-}
 
 <#
 .SYNOPSIS
@@ -443,4 +436,41 @@ function Assert-ValidDrivesAndPaths {
     }
 
     return -not $DriveErrors -and -not $PathErrors
+}
+
+<#
+.SYNOPSIS
+Sets the destination file metadata that deals with Creation/Modified dates and times to match the source file
+
+.DESCRIPTION
+Sets the destination file metadata that deals with Creation/Modified dates and times to match the source file
+
+.PARAMETER SourceFilePath
+Absolute path to the source file you wish to copy the dates and times metadata from
+
+.PARAMETER DestinationFilePath
+Absolute path to the destination file you wish to copy the dates and times metadata to
+
+.EXAMPLE
+Set-MetaDataToMatchSource -SourceFilePath "C:\Users\BraxtonWright\Desktop\Folder 1\where to put the folder.png" -DestinationFilePath "C:\Users\BraxtonWright\Desktop\Folder 2\where to put the folder.png"
+
+.NOTES
+The idea for this was found here https://superuser.com/a/924371
+#>
+function Set-MetaDataToMatchSource {
+    param
+    (
+        [Parameter(Mandatory, Position = 0)] [string] $SourceFilePath,
+        [Parameter(Mandatory, Position = 1)] [string] $DestinationFilePath
+    )
+
+    # I don't need to set the UTC properties because when you change the local times, it changes it.
+    # I also can't reliably update the LastAccessTime because when setting it, other processes may read the file when the timestamps are updated, thus updating the LastAccessTime.  https://superuser.com/a/1726436
+    $MetaDataToModify = $("CreationTime", "LastWriteTime")
+    foreach ($MetaData in $MetaDataToModify) {
+        $DMetaData = $(Get-Item $DestinationFilePath)
+        $SMetaData = $(Get-Item $SourceFilePath)
+        Write-Verbose "Setting the metadata ""$MetaData"" from ""$($DMetaData.$MetaData)"" to ""$($SMetaData.$MetaData)"""
+        $DMetaData.$MetaData = $SMetaData.$MetaData
+    }
 }
