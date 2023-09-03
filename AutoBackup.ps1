@@ -501,16 +501,17 @@ function Start-Backup {
             $SourceFiles = Get-ChildItem -Path $Entry.Source |
             Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } # Here we filter the results so we only get the files that we want to copy by using the variable AllowedFileTypes
             $DestinationFiles = Get-ChildItem -Path $Entry.Destination |
-            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # We don't filter the files out using AllowedFileTypes because we have to get all the files to check to see if they are in the source folder.
+            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } # We would normally not filter the files out using AllowedFileTypes because we have to get all the files to check to see if they are in the source folder, however because of the below reason this is no longer valid (SEE BELOW DESCRIPTION FOR MORE DETAILS).
 
             $FilesProcessed = 0
             # Loop through every entry inside the destination files, and if the file's name doesn't exist in the source, then delete the file.
-            foreach ($Item in $DestinationFiles) {
-                if ($Item.Name -notin $SourceFiles.Name) {
-                    Write-Verbose "`tRemoving the file located here ""$($Item.FullName)"" because it doesn't exist in the source files"
-                    Remove-Item -Path $Item.FullName
-                }
-            }
+            # THIS SHOULDN'T BE DONE BECAUSE OF THE FOLLOWING REASON:  The reasoning for this when it was being created was that it would act like how robocopy works.  However this is invalid reasoning because the folder might contain additional files that you want to keep but not copy because they can be recreated or you simply don't want to track them.  Take for example a folder with a bunch of .acf and .vdf files and you select all .acf files.  With the below logic, in the destination folder it will remove ALL the files that do not match that file type, this is fine if it makes a empty directory but not if it is a directory with files already in it.  This especially becomes important when you are restoring the files where the source would become the destination and the destination would become the source.  This would remove ALL files that are in the destination folder, originally the source, that are not .acf files.  Thus it would remove the .vdf files that you simply didn't want to track but should stay there.
+            # foreach ($Item in $DestinationFiles) {
+            #     if ($Item.Name -notin $SourceFiles.Name) {
+            #         Write-Verbose "`tRemoving the file located here ""$($Item.FullName)"" because it doesn't exist in the source files"
+            #         Remove-Item -Path $Item.FullName
+            #     }
+            # }
 
             foreach ($Item in $SourceFiles) {
                 # extract the file size and last write time from the file to determine if the file has change
