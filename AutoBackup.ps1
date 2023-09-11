@@ -647,7 +647,7 @@ function Get-RobocopyProgress {
         #endregion
 
         #region Overall progress calculation
-        $OverallCopyPercent = if ($FilesProcessedNow -gt 0) { ((($FilesProcessedNow - 1) / $TotalFileCount) * 100).ToString("###.#") }else { 0 }
+        $OverallCopyPercent = if ($FilesProcessedNow -gt 0) { ((($FilesProcessedNow - 1) / $TotalFileCount) * 100).ToString("###.#") } else { 0 }
         #endregion
 
         #region Estimated time remaining calculation
