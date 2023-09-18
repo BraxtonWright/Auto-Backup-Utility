@@ -401,35 +401,53 @@ function Start-Backup {
     # https://learn.microsoft.com/en-us/powershell/module/threadjob/start-threadjob?view=powershell-7.3
     # https://www.saggiehaim.net/background-jobs-start-threadjob-vs-start-job/
     # Count the number of files to be processed
+
+    $GetOnlyFiles = { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # This contains the logic for filtering for the Where-Object so we only have one copy of it.  To use this we simply say "Where-Object { & $GetOnlyFils }"  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
+
     foreach ($Entry in $JobsData) {
-        $SourceFileCount = 0
-        $DestinationFileCount = 0;
+        # the @() makes an array to be filled latter in the below logic
+        $SourceFiles = @()
+        $DestinationFiles = @()
+        $FileCount = 0
+
         #it is a directory
         if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             Write-Host "Counting the number of files in the directories
             `r`tSource: ""$($Entry.Source)""
             `r`tDestination: ""$($Entry.Destination)"""
-            #attempted to multi-thread this using "Start-Job" and "Start-Threadjob", but can't get the jobs to return the number of files, it always returns 7 for some reason https://www.youtube.com/watch?v=8xqrdk5sYyE&ab_channel=MrAutomation
-            #"-File" means only get files, "-Force" means find hidden/system files, and "-Recurse" means go through all folders
-            $SourceFileCount = (Get-ChildItem -Path $Entry.Source -File -Force -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
-            $DestinationFileCount = (Get-ChildItem -Path $Entry.Destination -file -force -recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+            # Attempted to multi-thread this using "Start-Job" and "Start-Threadjob", but can't get the jobs to return the number of files, it always returns 7 for some reason https://www.youtube.com/watch?v=8xqrdk5sYyE&ab_channel=MrAutomation
+            # "-File" means only get files, "-Force" means find hidden/system files, and "-Recurse" means go through all folders
+            # Makes an array of relative file paths from the source path
+            $SourceFiles = Get-ChildItem -Path $Entry.Source -File -Force -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName |
+                ForEach-Object {$_.Substring($Entry.Source.Length)}
+            # Makes an array of relative file paths from the destination path
+            $DestinationFiles = Get-ChildItem -Path $Entry.Destination -File -Force -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName |
+                ForEach-Object {$_.Substring($Entry.Destination.Length)}
         }
-        #it is a file or set of files with a extension
+        #it is a file or set of files
         else {
             Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileMatching.Replace('/',", "))`"..."
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
 
-            $SourceFileCount = (Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } |
-                Measure-Object).Count
-            # We don't count the number of files in the destination directory because of this issue with it.  If the number of files in the Destination folder are greater than those in the source but they are all or mostly different to what is in the source, then when we go to copy the new/modified files, we will never get 100% for the job or the overall progress.
-            # This is because lets say that a job has 7 files in the source and 15 in the destination that are all different to the source, then the number of files processed will be at best 7 / 15 because we only count the number of files processed that are copied from the source to the destination.
-            $DestinationFileCount = 0
+            $SourceFiles = Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
+                Select-Object -ExpandProperty Name
+            $DestinationFiles = Get-ChildItem -Path $Entry.Destination -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
+                Select-Object -ExpandProperty Name
         }
-        $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value ($SourceFileCount -gt $DestinationFileCount ? $SourceFileCount : $DestinationFileCount)
 
-        Write-Verbose "`tFile count discovered $SourceFileCount and $DestinationFileCount"
+        # Compares the two arrays and determine the number of files that will be processed, I.E. it will find the unique number of files in the source and destination https://java2blog.com/compare-contents-of-two-folders-powershell/
+        $FileCount = Compare-Object -ReferenceObject $SourceFiles -DifferenceObject $DestinationFiles -IncludeEqual |
+            Measure-Object |
+            Select-Object -ExpandProperty Count
+
+        $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value $FileCount
+
+        Write-Verbose "`tFile count discovered source: $($SourceFiles | Measure-Object | Select-Object -ExpandProperty Count), destination: $($DestinationFiles | Measure-Object | Select-Object -ExpandProperty Count), unique: $FileCount"
         
         $TotalFileCount += $($Entry.FileCount)
     }
@@ -493,39 +511,50 @@ function Start-Backup {
         else {
             #the destination directory doesn't exist yet
             if (-not (Test-Path $Entry.Destination)) {
+                Write-Verbose "Creating a folder here because it doesn't exist ""$($Entry.Destination)"""
                 New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
             }
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
-            # I would have liked to have the logic for filtering all in one variable, however we have to check the Destination files differently compared to the Source files so they have to be different.  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
-            $SourceFiles = Get-ChildItem -Path $Entry.Source |
-            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } # Here we filter the results so we only get the files that we want to copy by using the variable AllowedFileTypes
-            $DestinationFiles = Get-ChildItem -Path $Entry.Destination |
-            Where-Object { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') -and ($_.Name -match $AllowedFileTypes) } # We would normally not filter the files out using AllowedFileTypes because we have to get all the files to check to see if they are in the source folder, however because of the below reason this is no longer valid (SEE BELOW DESCRIPTION FOR MORE DETAILS).
+            Write-Verbose "Finding files that match the following $AllowedFileTypes"
+
+            # Here we filter the files from the source and destination so we can see what files are in the destination but not the source
+            $SourceFilesData = Get-ChildItem -Path $Entry.Source |
+                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) }
+            $DestinationFilesData = Get-ChildItem -Path $Entry.Destination |
+                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) }
+            
+            # Now we get the unique files from both source and destination https://java2blog.com/compare-contents-of-two-folders-powershell/
+            $FilesToProcess = Compare-Object -ReferenceObject $SourceFilesData -DifferenceObject $DestinationFilesData -Property Name -IncludeEqual
 
             $FilesProcessed = 0
-            # Loop through every entry inside the destination files, and if the file's name doesn't exist in the source, then delete the file.
-            # THIS SHOULDN'T BE DONE BECAUSE OF THE FOLLOWING REASON:  The reasoning for this when it was being created was that it would act like how robocopy works.  However this is invalid reasoning because the folder might contain additional files that you want to keep but not copy because they can be recreated or you simply don't want to track them.  Take for example a folder with a bunch of .acf and .vdf files and you select all .acf files.  With the below logic, in the destination folder it will remove ALL the files that do not match that file type, this is fine if it makes a empty directory but not if it is a directory with files already in it.  This especially becomes important when you are restoring the files where the source would become the destination and the destination would become the source.  This would remove ALL files that are in the destination folder, originally the source, that are not .acf files.  Thus it would remove the .vdf files that you simply didn't want to track but should stay there.
-            # foreach ($Item in $DestinationFiles) {
-            #     if ($Item.Name -notin $SourceFiles.Name) {
-            #         Write-Verbose "`tRemoving the file located here ""$($Item.FullName)"" because it doesn't exist in the source files"
-            #         Remove-Item -Path $Item.FullName
-            #     }
-            # }
 
-            foreach ($Item in $SourceFiles) {
-                # extract the file size and last write time from the file to determine if the file has change
-                $SMetaData = Get-Item $Item.FullName | Select-Object Length, LastWriteTime
-                $DMetaData = $DestinationFiles | Where-Object { $_.Name -eq $Item.Name } | Select-Object Length, LastWriteTime
-                #If one of the two properties has changed, then overwrite the destination file with the new file.
-                if ($SMetaData.Length -ne $DMetaData.Length -or $SMetaData.LastWriteTime -ne $DMetaData.LastWriteTime) {
-                    Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -From ""$($Item.FullName)"" -To ""$($Entry.Destination + "\" + $Item.Name)"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesProcessed $FilesProcessed'"
-                    Copy-ItemWithProgress -From "$($Item.FullName)" -To "$($Entry.Destination + "\" + $Item.Name)" @ProgressParams -FilesProcessed $FilesProcessed
-                    # Now change the metadata of the file to make it match the Source file.  We do this because when we call Copy-ItemWithProgress on the source file, we then create a NEW file with the same content.  So it's metadata would be unsurprisingly be different.  Making a new file with the same content doesn't act like a copy and paste, those two keep most of the metadata intact.
-                    Set-MetaDataToMatchSource -SourceFilePath $Item.FullName -DestinationFilePath $($Entry.Destination + "\" + $Item.Name)
+            foreach ($Item in $FilesToProcess) {
+                # The file is in the destination but not in the source, delete it
+                if($Item.SideIndicator -eq "=>") {
+                    $DestinationFilePath = $DestinationFilesData | Where-Object Name -eq $Item.Name | Select-Object -ExpandProperty FullName
+                    Write-Verbose "`tRemoving the file located here ""$DestinationFilePath"" because it doesn't exist in the source files"
+                    Remove-Item -Path "$DestinationFilePath"
                 }
+                # The file is in the source and possibly, in the destination
                 else {
-                    Write-Verbose "`tSkipping the file located here ""$($Item.FullName)"" because it hasn't changed"
+                    # Select the file's metadata from both source and destination so we can determine if the file has change.
+                    $SMetaData = $SourceFilesData | Where-Object Name -eq $Item.Name
+                    $DMetaData = $DestinationFilesData | Where-Object Name -eq $Item.Name
+                    
+                    # If the file size or the last write time has are different, then overwrite the destination file with the new file or simply write it if it is in the source but not in the destination.
+                    if ($SMetaData.Length -ne $DMetaData.Length -or $SMetaData.LastWriteTime -ne $DMetaData.LastWriteTime) {
+                        $DestinationFilePath = "$($Entry.Destination + "\" + $SMetaData.Name)"
+                        Write-Verbose "$($SMetaData.Length) -ne $($DMetaData.Length) -or $($SMetaData.LastWriteTime) -ne $($DMetaData.LastWriteTime)"
+                        Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -From ""$($SMetaData.FullName)"" -To ""$DestinationFilePath"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesProcessed $FilesProcessed'"
+                        Copy-ItemWithProgress -From "$($SMetaData.FullName)" -To $DestinationFilePath @ProgressParams -FilesProcessed $FilesProcessed
+                        # Now change the metadata of the file to make it match the Source file.  We do this because when we call Copy-ItemWithProgress on the source file, we then create a NEW file with the same content.  So it's metadata would be unsurprisingly be different.  Making a new file with the same content doesn't act like a copy and paste, this keeps most of the metadata intact.
+                        Set-MetaDataToMatchSource -SourceFilePath $SMetaData.FullName -DestinationFilePath $DestinationFilePath
+                    }
+                    # Skip the file because it hasn't been modified
+                    else {
+                        Write-Verbose "`tSkipping the file located here ""$($SMetaData.FullName)"" because it hasn't changed"
+                    }
                 }
 
                 $ProgressParams.TotalFilesProcessed += 1
