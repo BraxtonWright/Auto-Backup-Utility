@@ -90,6 +90,7 @@ function Get-MainScreen {
     Clear-Host
 }
 
+#region Backup/restore screens
 <#
 .SYNOPSIS
 Select either to backup or restore a job
@@ -193,6 +194,7 @@ function Select-Jobs {
         }
     } while ($BackCharAnswer -notcontains $UserInput)
 }
+#endregion
 
 <#
 .SYNOPSIS
