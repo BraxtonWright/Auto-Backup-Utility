@@ -354,7 +354,7 @@ function Get-BackupDataScreen {
         do {
             Clear-Host
 
-            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $($ExtractedJobData | Select-Object Source, Destination, JobOperation)
+            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $($ExtractedJobData | Select-Object Source, Destination, JobOperation, JobName)
             $ExtractedJobData | ForEach-Object { Write-Verbose $_ }
             if ($PathsAreValid) {
                 #NEED TO SEE IF THERE IS A PERFORMANCE HIT USING THE TIME REMAINING FUNCTION

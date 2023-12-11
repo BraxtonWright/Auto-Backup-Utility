@@ -361,7 +361,7 @@ function Assert-ValidDrivesAndPaths {
 
         $SPath = $Entry.Source
         $DPath = $Entry.Destination
-        Write-Verbose "JobOperation: $($Entry.JobOperation -eq $JobOperations.Restore)
+        Write-Verbose "Is the JobOperation restoring: $($Entry.JobOperation -eq $JobOperations.Restore)
         `r`tSource: $SPath
         `r`tDestination: $DPath"
 
@@ -369,11 +369,11 @@ function Assert-ValidDrivesAndPaths {
         $DDrive = $DPath.substring(0, 2)
 
         $SDriveDetected = Test-Path $SDrive
-        Write-Verbose "Results of Test-Path $SDrive = $SDriveDetected"
+        Write-Verbose "Results of Test-Path for source drive $SDrive = $SDriveDetected"
         $DDriveDetected = Test-Path $DDrive
-        Write-Verbose "Results of Test-Path $DDrive = $DDriveDetected"
+        Write-Verbose "Results of Test-Path for destination drive $DDrive = $DDriveDetected"
         $SPathDetected = Test-Path $SPath
-        Write-Verbose "Results of Test-Path $SPath = $SPathDetected"
+        Write-Verbose "Results of Test-Path for source path $SPath = $SPathDetected"
 
         if (-not $SDriveDetected -and ([String]$SDrive[0]).ToUpper() -notin $ErrorData.Drives) {
             Write-Verbose "`tSource drive ""$(([String]$SDrive[0]).ToUpper())"" not detected"
