@@ -407,10 +407,8 @@ function Start-Backup {
     $GetOnlyFiles = { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # This contains the logic for filtering for the Where-Object so we only have one copy of it.  To use this we simply say "Where-Object { & $GetOnlyFils }"  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
 
     foreach ($Entry in $JobsData) {
-        # the @() makes an array to be filled latter in the below logic
-        $SourceFiles = @()
-        $DestinationFiles = @()
-        $FileCount = 0
+        $InSourceAndDestination = 0;
+        $InSourceXorDestination = 0;
 
         #it is a directory
         if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
@@ -419,14 +417,19 @@ function Start-Backup {
             `r`tDestination: ""$($Entry.Destination)"""
             # Attempted to multi-thread this using "Start-Job" and "Start-Threadjob", but can't get the jobs to return the number of files, it always returns 7 for some reason https://www.youtube.com/watch?v=8xqrdk5sYyE&ab_channel=MrAutomation
             # "-File" means only get files, "-Force" means find hidden/system files, and "-Recurse" means go through all folders
-            # Makes an array of relative file paths from the source path
-            $SourceFiles = Get-ChildItem -Path $Entry.Source -File -Force -Recurse -ErrorAction SilentlyContinue |
-                Select-Object -ExpandProperty FullName |
-                ForEach-Object {$_.Substring($Entry.Source.Length)}
-            # Makes an array of relative file paths from the destination path
-            $DestinationFiles = Get-ChildItem -Path $Entry.Destination -File -Force -Recurse -ErrorAction SilentlyContinue |
-                Select-Object -ExpandProperty FullName |
-                ForEach-Object {$_.Substring($Entry.Destination.Length)}
+            # Goes through each file located inside the source directory and checks to see if the file exists in the targeted destination directory
+            Get-ChildItem -Path $Entry.Source -File -Force -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    # We supply the argument -LiteralPath for the cmdlet Test-Path so that it uses exactly as it is typed. No characters are interpreted as wildcard characters. A complete list of these can be found here https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_wildcards?view=powershell-7.4  Where I found this solution https://stackoverflow.com/questions/10145775/test-path-fails-to-return-true-on-a-file-that-exists
+                    if (Test-Path -LiteralPath ($Entry.Destination + $_.FullName.Substring($Entry.Source.Length))) {$InSourceAndDestination += 1}
+                    else {$InSourceXorDestination += 1}
+                }
+            # Goes through each file located inside the destination directory and checks to see if the file exists in the targeted source directory
+            Get-ChildItem -Path $Entry.Destination -File -Force -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    # We supply the argument -LiteralPath for the cmdlet Test-Path so that it uses exactly as it is typed. No characters are interpreted as wildcard characters. A complete list of these can be found here https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_wildcards?view=powershell-7.4  Where I found this solution https://stackoverflow.com/questions/10145775/test-path-fails-to-return-true-on-a-file-that-exists
+                    if (-not (Test-Path -LiteralPath ($Entry.Source + $_.FullName.Substring($Entry.Destination.Length)))) {$InSourceXorDestination += 1}
+                }
         }
         #it is a file or set of files
         else {
@@ -434,22 +437,27 @@ function Start-Backup {
 
             $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
 
-            $SourceFiles = Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
+            Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
                 Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
-                Select-Object -ExpandProperty Name
-            $DestinationFiles = Get-ChildItem -Path $Entry.Destination -File -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    if (Test-Path -LiteralPath ($Entry.Destination + "/" + $_.Name)) {$InSourceAndDestination += 1}
+                    else {$InSourceXorDestination += 1}
+                }
+            Get-ChildItem -Path $Entry.Destination -File -Force -ErrorAction SilentlyContinue |
                 Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
-                Select-Object -ExpandProperty Name
+                ForEach-Object {
+                    if (-not (Test-Path -LiteralPath ($Entry.Source + "/" + $_.Name))) {$InSourceXorDestination += 1}
+                }
         }
 
+        Write-Verbose "File count common: $InSourceAndDestination`n`tdifferent: $InSourceXorDestination`n`tFiles to be processed: $($InSourceAndDestination + $InSourceXorDestination)"
+
         # Compares the two arrays and determine the number of files that will be processed, I.E. it will find the unique number of files in the source and destination https://java2blog.com/compare-contents-of-two-folders-powershell/
-        $FileCount = Compare-Object -ReferenceObject $SourceFiles -DifferenceObject $DestinationFiles -IncludeEqual |
-            Measure-Object |
-            Select-Object -ExpandProperty Count
+        # $FileCount = Compare-Object -ReferenceObject $SourceFiles -DifferenceObject $DestinationFiles -IncludeEqual |
+        #     Measure-Object |
+        #     Select-Object -ExpandProperty Count
 
-        $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value $FileCount
-
-        Write-Verbose "`tFile count discovered source: $($SourceFiles | Measure-Object | Select-Object -ExpandProperty Count), destination: $($DestinationFiles | Measure-Object | Select-Object -ExpandProperty Count), unique: $FileCount"
+        $Entry | Add-Member -MemberType NoteProperty -Name 'FileCount' -Value ($InSourceAndDestination + $InSourceXorDestination)
         
         $TotalFileCount += $($Entry.FileCount)
     }
@@ -496,7 +504,7 @@ function Start-Backup {
         $ProgressParams.JobOperation = $Entry.JobOperation
         $ProgressParams.JobFileCount = $Entry.FileCount
 
-        #it is a directory we are copying
+        # it is a directory we are copying
         if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
                 Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $RoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
@@ -511,8 +519,8 @@ function Start-Backup {
         }
         # It is a set of files we are copying
         else {
-            #the destination directory doesn't exist yet
-            if (-not (Test-Path $Entry.Destination)) {
+            # the destination directory doesn't exist yet
+            if (-not (Test-Path -LiteralPath $Entry.Destination)) {
                 Write-Verbose "Creating a folder here because it doesn't exist ""$($Entry.Destination)"""
                 New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
             }
@@ -527,7 +535,7 @@ function Start-Backup {
                 Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) }
             
             # Now we get the unique files from both source and destination https://java2blog.com/compare-contents-of-two-folders-powershell/
-            $FilesToProcess = Compare-Object -ReferenceObject $SourceFilesData -DifferenceObject $DestinationFilesData -Property Name -IncludeEqual
+            $FilesToProcess = if($null -eq $DestinationFilesData){$SourceFilesData} else{Compare-Object -ReferenceObject $SourceFilesData -DifferenceObject $DestinationFilesData -Property Name -IncludeEqual}
 
             $FilesProcessed = 0
 
