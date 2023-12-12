@@ -2,7 +2,7 @@
 #Requires -Version 7.0
 
 # To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
-# $VerbosePreference = "continue"
+$VerbosePreference = "continue"
 
 #region Library Importing
 Import-Module -DisableNameChecking $PSScriptRoot\util\Helper-Functions.psm1
@@ -454,7 +454,7 @@ function Start-Backup {
         $TotalFileCount += $($Entry.FileCount)
     }
     
-    Clear-Host
+    # Clear-Host
 
     Write-Verbose "Total number of files to be processed: $TotalFileCount"
 
