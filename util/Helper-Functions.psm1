@@ -1,7 +1,5 @@
-<#
-Only put in the functions that are completed in here because the Write-Verbose command will not be accepted here unless you uncomment out the the line "$VerbosePreference = 'Continue'" in this file
-#>
-#$VerbosePreference = 'Continue'
+# Only put in the functions that are completed in here because the Write-Verbose command will not be executed unless you uncomment out the below line
+# $VerbosePreference = "Continue"
 
 <#
 .SYNOPSIS
