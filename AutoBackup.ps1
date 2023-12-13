@@ -387,7 +387,7 @@ The job data to copy from/to
 Start-Backup -JobsData $JobsData
 
 .NOTES
-(WIP) Need to make it so that $JObsData only contains the source and destination paths
+(WIP) Need to make it so that $JobsData only contains the source and destination paths
 #>
 function Start-Backup {
     [CmdletBinding()]
@@ -405,6 +405,39 @@ function Start-Backup {
     # Count the number of files to be processed
 
     $GetOnlyFiles = { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # This contains the logic for filtering for the Where-Object so we only have one copy of it.  To use this we simply say "Where-Object { & $GetOnlyFils }"  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
+
+    <#
+    .SYNOPSIS
+    A new like operator that allows for multiple like conditions in one easy to use function
+    Source for this function but converting it into powershell https://stackoverflow.com/a/13019721
+
+    .DESCRIPTION
+    This will take two arguments, FileName and ValidFileTypes, and it will determine if the file should be processed
+
+    .PARAMETER FileName
+    The name of the file you wish to check
+
+    .PARAMETER ValidFileTypes
+    An array of valid like operators that says the file should be selected
+
+    .EXAMPLE
+    New-LikeOperator -FileName 'This is a new file.txt' -ValidFileTypes @(This*, *new*, *.txt)
+
+    .NOTES
+    N.A.
+    #>
+    function New-LikeOperator {
+        [CmdletBinding()]
+        param
+        (
+            [Parameter(Mandatory, Position = 0)] [string] $FileName,
+            [Parameter(Mandatory, Position = 1)] [array] $ValidFileTypes
+        )
+        
+        # We don't have to inclose the pattern variable inside a set of "" inside the below if statment, they are not required.  They are only required if you manauly use this command
+        foreach($pattern in $ValidFileTypes) { if($FileName -like $pattern) { return $true; } }
+        return $false;
+    }
 
     foreach ($Entry in $JobsData) {
         $InSourceAndDestination = 0;
@@ -435,16 +468,17 @@ function Start-Backup {
         else {
             Write-Host "Counting the number of files in the directory `"$($Entry.Source)`" that matches one of the following `"$($Entry.FileMatching.Replace('/',", "))`"..."
 
-            $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
+            # Split the list of allowed file types after every '/' so we make an array of items
+            $AllowedFileTypes = $Entry.FileMatching -split '/'
 
             Get-ChildItem -Path $Entry.Source -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
+                Where-Object { (& $GetOnlyFiles) -and (New-LikeOperator -FileName $_.Name -ValidFileTypes $AllowedFileTypes)} |
                 ForEach-Object {
                     if (Test-Path -LiteralPath ($Entry.Destination + "/" + $_.Name)) {$InSourceAndDestination += 1}
                     else {$InSourceXorDestination += 1}
                 }
             Get-ChildItem -Path $Entry.Destination -File -Force -ErrorAction SilentlyContinue |
-                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) } |
+                Where-Object { (& $GetOnlyFiles) -and (New-LikeOperator -FileName $_.Name -ValidFileTypes $AllowedFileTypes) } |
                 ForEach-Object {
                     if (-not (Test-Path -LiteralPath ($Entry.Source + "/" + $_.Name))) {$InSourceXorDestination += 1}
                 }
@@ -483,8 +517,8 @@ function Start-Backup {
     #(/MIR) (/E) (/IS) (/NP) /NDL /NC /BYTES /NJH /NJS
     #endregion
 
-    #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-    $RoboCopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
+    #these varaibles will use what is called splatting to replace the contents of the array/objects into a cmdlet https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+    $CommonRoboCopyParams = "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
     $ProgressParams = @{
         "JobName"             = "TBD"
         "JobDescription"      = "TBD"
@@ -507,74 +541,35 @@ function Start-Backup {
         # it is a directory we are copying
         if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
             if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $RoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @RoboCopyParams | Get-RobocopyProgress @ProgressParams
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /MIR $CommonRoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /MIR @CommonRoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
             else {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /mt:$Global:UDThreadUsage $RoboCopyParams'"
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /mt:$Global:UDThreadUsage @RoboCopyParams | Get-RobocopyProgress @ProgressParams
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /MIR /mt:$Global:UDThreadUsage $CommonRoboCopyParams'"
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /MIR /mt:$Global:UDThreadUsage @CommonRoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
-
-            $ProgressParams.TotalFilesProcessed += $Entry.FileCount
         }
         # It is a set of files we are copying
         else {
-            # the destination directory doesn't exist yet
-            if (-not (Test-Path -LiteralPath $Entry.Destination)) {
-                Write-Verbose "Creating a folder here because it doesn't exist ""$($Entry.Destination)"""
-                New-Item $Entry.Destination -ItemType Directory | Out-Null  # The Out-Null makes it is so it doesn't display the directories creation.  https://stackoverflow.com/questions/46586382/hide-powershell-output
+            # Split the list of allowed file types after every '/'.  In the powershell window if we were to do this command manually, we would have to enclose each one of these file conditions inside a set of quotation marks.  But for some reason, we don't have to do it here and it will not work with them included.
+            $AllowedFileTypes = $Entry.FileMatching -split '/'
+
+            if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $AllowedFileTypes $CommonRoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @AllowedFileTypes @CommonRoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
-
-            $AllowedFileTypes = $Entry.FileMatching.Replace('/', '|')
-            Write-Verbose "Finding files that match the following $AllowedFileTypes"
-
-            # Here we filter the files from the source and destination so we can see what files are in the destination but not the source
-            $SourceFilesData = Get-ChildItem -Path $Entry.Source |
-                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) }
-            $DestinationFilesData = Get-ChildItem -Path $Entry.Destination |
-                Where-Object { (& $GetOnlyFiles) -and ($_.Name -match $AllowedFileTypes) }
-            
-            # Now we get the unique files from both source and destination https://java2blog.com/compare-contents-of-two-folders-powershell/
-            $FilesToProcess = if($null -eq $DestinationFilesData){$SourceFilesData} else{Compare-Object -ReferenceObject $SourceFilesData -DifferenceObject $DestinationFilesData -Property Name -IncludeEqual}
-
-            $FilesProcessed = 0
-
-            foreach ($Item in $FilesToProcess) {
-                # The file is in the destination but not in the source, delete it
-                if($Item.SideIndicator -eq "=>") {
-                    $DestinationFilePath = $DestinationFilesData | Where-Object Name -eq $Item.Name | Select-Object -ExpandProperty FullName
-                    Write-Verbose "`tRemoving the file located here ""$DestinationFilePath"" because it doesn't exist in the source files"
-                    Remove-Item -Path "$DestinationFilePath"
-                }
-                # The file is in the source and possibly, in the destination
-                else {
-                    # Select the file's metadata from both source and destination so we can determine if the file has change.
-                    $SMetaData = $SourceFilesData | Where-Object Name -eq $Item.Name
-                    $DMetaData = $DestinationFilesData | Where-Object Name -eq $Item.Name
-                    
-                    # If the file size or the last write time has are different, then overwrite the destination file with the new file or simply write it if it is in the source but not in the destination.
-                    if ($SMetaData.Length -ne $DMetaData.Length -or $SMetaData.LastWriteTime -ne $DMetaData.LastWriteTime) {
-                        $DestinationFilePath = "$($Entry.Destination + "\" + $SMetaData.Name)"
-                        Write-Verbose "$($SMetaData.Length) -ne $($DMetaData.Length) -or $($SMetaData.LastWriteTime) -ne $($DMetaData.LastWriteTime)"
-                        Write-Verbose "`tRunning the command 'Copy-ItemWithProgress -From ""$($SMetaData.FullName)"" -To ""$DestinationFilePath"" $(foreach ($Key in $ProgressParams.Keys) {"-" + $Key + " " + $($ProgressParams.$Key)}) -FilesProcessed $FilesProcessed'"
-                        Copy-ItemWithProgress -From "$($SMetaData.FullName)" -To $DestinationFilePath @ProgressParams -FilesProcessed $FilesProcessed
-                        # Now change the metadata of the file to make it match the Source file.  We do this because when we call Copy-ItemWithProgress on the source file, we then create a NEW file with the same content.  So it's metadata would be unsurprisingly be different.  Making a new file with the same content doesn't act like a copy and paste, this keeps most of the metadata intact.
-                        Set-MetaDataToMatchSource -SourceFilePath $SMetaData.FullName -DestinationFilePath $DestinationFilePath
-                    }
-                    # Skip the file because it hasn't been modified
-                    else {
-                        Write-Verbose "`tSkipping the file located here ""$($SMetaData.FullName)"" because it hasn't changed"
-                    }
-                }
-
-                $ProgressParams.TotalFilesProcessed += 1
-                $FilesProcessed += 1
+            else {
+                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $AllowedFileTypes /mt:$Global:UDThreadUsage $CommonRoboCopyParams'"
+                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @AllowedFileTypes /mt:$Global:UDThreadUsage @CommonRoboCopyParams | Get-RobocopyProgress @ProgressParams
             }
         }
+
+        $ProgressParams.TotalFilesProcessed += $Entry.FileCount
     }
 
-    Write-Progress -Id 1 -Activity "temp" -Completed
-    Write-Progress -Id 0 -Activity "temp" -Completed
+    # Remove the progress bars because ocasounally, the progress bars will stay on the terminal after processing the jobs
+    Write-Progress -Id 1 -Activity "Completed" -Completed
+    Write-Progress -Id 0 -Activity "Completed" -Completed
 }
 
 <#
@@ -612,7 +607,7 @@ The datetime that the backup process has been initiated
 Robocopy "C:" "D:" /MIR /W:0 /R:1 | Get-RobocopyProgress -JobName "Game files" -JobFileCount = 123 -TotalFileCount 123 -FilesProcessed 0 -StartTime Get-Date
 
 .NOTES
-source for this function was found here https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/h97skef/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
+Source for this function was found here https://www.reddit.com/r/PowerShell/comments/p4l4fm/better_way_of_robocopy_writeprogress/h97skef/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
 #>
 function Get-RobocopyProgress {
     [CmdletBinding()]
@@ -717,166 +712,6 @@ function Get-RobocopyProgress {
 
 <#
 .SYNOPSIS
-Copy a single file from one location to another with a progress bar
-
-.DESCRIPTION
-This will copy a single file from one location to another while writing the progress to the user for the file being copied
-
-.PARAMETER From
-The Path to the file you wish to copy
-
-.PARAMETER To
-The destination folder you wish to copy the file to
-
-.PARAMETER JobName
-The name of the job that is being processed
-
-.PARAMETER JobDescription
-The Describer for the current job, such as "Files steam uses to detect game files"
-
-.PARAMETER JobOperation
-The operation that the job will perform, "backup" or "restore"
-
-.PARAMETER JobFileCount
-The number of files to be processed for the current job
-
-.PARAMETER TotalFileCount
-The total number of files to be processed for all jobs
-
-.PARAMETER TotalFilesProcessed
-The total number of files that have been processed for all jobs
-
-.PARAMETER StartTime
-The datetime that the backup process has been initiated
-
-.PARAMETER FilesProcessed
-The total number of files that have been processed for the job's entry
-
-.EXAMPLE
-$ProgressParams = @{
-    "From"                = "D:\Steam\bin\cef\cef.win7x64\steamwebhelper.exe"
-    "To"                  = "C:\Steam\bin\cef\cef.win7x64\steamwebhelper.exe"
-    "JobName"             = "Steam web helper"
-    "JobDescription"      = "Steam Web helper file"
-    "JobOperation"        = "backup"
-    "JobFileCount"        = 1
-    "TotalFileCount"      = 1
-    "TotalFilesProcessed" = 0
-    "StartTime"           = Get-Date
-    "FilesProcessed"         = 0
-}
-
-Copy-ItemWithProgress @ProgressParams
-
-.NOTES
-(WIP) Need to add some logic to determine if the file has been modified and thus it needs to be re-copied
-This can be done by looking at the meta-data of the file and looking specifically at the Size and Modified properties.
-https://evotec.xyz/getting-file-metadata-with-powershell-similar-to-what-windows-explorer-provides/
-These two properties are what RoboCopy uses to determine if a file has changed
-https://www.google.com/search?q=How+does+robocopy+know+that+a+file+been+modified%3F&oq=How+does+robocopy+know+that+a+file+been+modified%3F&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTIKCAEQIRigARjDBNIBCTIxODY2ajFqN6gCALACAA&client=ms-android-samsung-rvo1&sourceid=chrome-mobile&ie=UTF-8
-If one of the two properties has change, then replace the file.
-Source for the start of this function https://stackoverflow.com/a/2436119
-#>
-function Copy-ItemWithProgress {
-    [CmdletBinding()]
-    param
-    (
-        [Parameter(Mandatory, Position = 0)] [string] $From,
-        [Parameter(Mandatory, Position = 1)] [string] $To,
-        [Parameter(Mandatory, Position = 2)] [string] $JobName,
-        [Parameter(Mandatory, Position = 3)] [string] $JobDescription,
-        [Parameter(Mandatory, Position = 4)] [String] $JobOperation,
-        [Parameter(Mandatory, Position = 5)] [double] $JobFileCount,        
-        [Parameter(Mandatory, Position = 6)] [double] $TotalFileCount,
-        [Parameter(Mandatory, Position = 7)] [double] $TotalFilesProcessed,
-        [Parameter(Mandatory, Position = 8)] [datetime] $StartTime,
-        [Parameter(Mandatory, Position = 9)] [double] $FilesProcessed
-    )
-
-    begin {
-        $ffile = [io.file]::OpenRead($From)
-        $tofile = [io.file]::OpenWrite($To)
-
-        #region file copy variables
-        [string]$FileName = $From | Split-Path -Leaf  #gets the name of the file from the path
-        [double]$FileCopyPercent = 0
-        [double]$FileSize = (Get-Item $From).Length
-        [string]$FileSizeString = switch ($FileSize) {
-            #convert the double file size to it't most readable format
-            { $_ -gt 1TB -and $_ -lt 1024TB } {
-                "$("{0:n2}" -f ($FileSize / 1TB) + " TB")"
-            }
-            { $_ -gt 1GB -and $_ -lt 1024GB } {
-                "$("{0:n2}" -f ($FileSize / 1GB) + " GB")"
-            }
-            { $_ -gt 1MB -and $_ -lt 1024MB } {
-                "$("{0:n2}" -f ($FileSize / 1MB) + " MB")"
-            }
-            { $_ -ge 1KB -and $_ -lt 1024KB } {
-                "$("{0:n2}" -f ($FileSize / 1KB) + " KB")"
-            }
-            { $_ -lt 1KB } {
-                "$FileSize B"
-            }
-        }
-        [double]$JobFilesLeft = $JobFileCount - $FilesProcessed
-        #endregion
-        #region Overall progress variables
-        [double]$OverallCopyPercent = 0
-        [double]$OverallFilesLeft = $TotalFileCount - $TotalFilesProcessed
-        #endregion
-    }
-
-    process {
-        try {
-            [byte[]]$buff = new-object byte[] 4096
-            [long]$total = [int]$count = 0
-            do {
-                $count = $ffile.Read($buff, 0, $buff.Length)
-                $tofile.Write($buff, 0, $count)
-                $total += $count
-                if ($total % 1mb -eq 0) {
-                    #region Progress calculation
-                    $OverallCopyPercent = if ($TotalFilesProcessed -gt 0) { ((($TotalFilesProcessed - 1) / $TotalFileCount) * 100).ToString("###.#") } else { 0 }
-                    $FileCopyPercent = if ($total -gt 0) { (($total / $FileSize) * 100).ToString('###.#') } else { 0 }
-                    #endregion
-
-                    #region Estimated time remaining calculation
-                    $TimeToCompletion = Get-TimeRemaining -StartTime $StartTime -ProgressPercent $OverallCopyPercent
-                    #endregion
-
-                    #this is called splatting https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-                    $BackupProgressParameters = @{
-                        ID               = 0
-                        Activity         = $JobOperation -eq $JobOperations.Backup ? "Generating backup for the job ""$JobName""" : "Restoring files for the job ""$JobName"""
-                        Status           = "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
-                        PercentComplete  = $OverallCopyPercent
-                        CurrentOperation = "Files copied: $(($TotalFilesProcessed).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
-                    }
-
-                    $CopyProgressParameters = @{
-                        ID               = 1
-                        ParentID         = 0
-                        Activity         = $JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$JobDescription""" : "Currently restoring: ""$JobDescription"""
-                        Status           = "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
-                        PercentComplete  = $FileCopyPercent
-                        CurrentOperation = "Copied: $(($FilesProcessed).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($JobFilesLeft.ToString('N0'))"
-                    }
-
-                    Assert-Progress -OverallProgressParams $BackupProgressParameters -CurrentProgressParams $CopyProgressParameters
-                }
-            } while ($count -gt 0)
-        }
-        finally {
-            $ffile.Dispose()
-            $tofile.Dispose()
-            #Write-Progress -Activity "Copying file" -Status "Ready" -Completed
-        }
-    }
-}
-
-<#
-.SYNOPSIS
 Get the time remaining for the process
 
 .DESCRIPTION
@@ -892,7 +727,7 @@ The percent of the overall copy progress
 Get-TimeRemaining -StartTime Get-Date -ProgressPercent 85.76
 
 .NOTES
-Source for the process (either with the 3 up votes, they are copies of each other) https://social.msdn.microsoft.com/Forums/vstudio/en-US/5d847962-2e7c-4b3b-bccd-7492936bef33/how-could-i-create-an-estimated-time-remaining?forum=csharpgeneral with some modifications on my end.
+Source for the process (either comment from Andreas Johansson, they are copies of th epost) https://social.msdn.microsoft.com/Forums/vstudio/en-US/5d847962-2e7c-4b3b-bccd-7492936bef33/how-could-i-create-an-estimated-time-remaining?forum=csharpgeneral with some modifications on my end.
 #>
 function Get-TimeRemaining {
     [CmdletBinding()]
@@ -908,10 +743,10 @@ function Get-TimeRemaining {
         <#Write-Verbose "TimeSpent: $($TimeSpent.TotalSeconds)
             `r`tProgressPercent: $ProgressPercent
             `r`tTimeRemainingInSeconds: $TimeRemainingInSeconds"#>
-        Return New-TimeSpan -Seconds $TimeRemainingInSeconds #convert the variable "TimeRemainingInSeconds" to a timespan variable
+        return New-TimeSpan -Seconds $TimeRemainingInSeconds #convert the variable "TimeRemainingInSeconds" to a timespan variable
     }
     else {
-        Return "TBD"
+        return "TBD"
     }
 }
 
