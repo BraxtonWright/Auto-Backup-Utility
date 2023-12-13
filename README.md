@@ -9,4 +9,4 @@ To start the script, run the PowerShell script "Start.ps1" in any Powershell ter
 If you get an error saying something along the lines of `(Start.ps1 or AutoBackup.ps1) cannot be loaded because running scripts is disabled on this system`, then you need to change your execution policy from either `Undefined` or `Restricted` to `RemoteSigned` for either the current user (recommend) or the local machine.
 ### How to view/change your execution policies
 To view all of the execution policies for your system, run the following command in any Powershell terminal: `Get-ExecutionPolicy -List`<br />
-To change your execution policy for the current user or the local machine, you need to run one of the following commands in an administrator Powershell instance `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` or `Set-ExecutionPolicy -Scope LocalMachine RemoteSigned`.
+To change your execution policy for the current user or the local machine, you need to run one of the following commands in an administrator Powershell instance: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` or `Set-ExecutionPolicy -Scope LocalMachine RemoteSigned`.
