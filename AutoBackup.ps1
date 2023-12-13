@@ -496,7 +496,7 @@ function Start-Backup {
         $TotalFileCount += $($Entry.FileCount)
     }
     
-    # Clear-Host
+    Clear-Host
 
     Write-Verbose "Total number of files to be processed: $TotalFileCount"
 
