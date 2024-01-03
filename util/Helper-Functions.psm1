@@ -328,9 +328,9 @@ The data that contains at a minimum, an array of PSCustomObject (I have tested) 
 
 .EXAMPLE
 $Data = @(
-    [PSCustomObject]@{JobName="Game Files"; JobOperation='backup'; Source="R:\Steam\steamapps\common"; Destination="A:\Steam\steamapps\common"}, # Fails on Drives
-    [PSCustomObject]@{JobName="Game Files"; JobOperation='backup'; Source="C:\Steam\steamapps"; Destination="D:\Steam\steamapps"}, #Fails on Source path
-    [PSCustomObject]@{JobName="WorkShop Game Files"; JobOperation='restore';Source="D:\Steam\steamapps\workshop\content"; Destination="C:\Steam\steamapps\workshop\content"}, # Fails on Destination path
+    [PSCustomObject]@{JobName="Game Files"; JobOperation='backup'; Source="R:\Steam\steamapps\common"; Destination="A:\Steam\steamapps\common"}, # Fails on Drives letters
+    [PSCustomObject]@{JobName="Game Files"; JobOperation='backup'; Source="C:\Steam\steamapps"; Destination="D:\Steam\steamapps"}, # Fails on Source path
+    [PSCustomObject]@{JobName="WorkShop Game Files"; JobOperation='restore';Source="D:\Steam\steamapps\workshop\content"; Destination="C:\Steam\steamapps\workshop\content"}, # Fails on Destination path, because we are restoring
     [PSCustomObject]@{JobName="WorkShop Game Files"; JobOperation='backup'; Source="D:\Steam\steamapps\workshop"; Destination="C:\Steam\steamapps\workshop"} # Valid entry (Destination path is not processed, only the Destination drive path will be)
 )
 
@@ -363,8 +363,8 @@ function Assert-ValidDrivesAndPaths {
         `r`tSource: $SPath
         `r`tDestination: $DPath"
 
-        $SDrive = $SPath.substring(0, 2)
-        $DDrive = $DPath.substring(0, 2)
+        $SDrive = $SPath.substring(0, 2).ToUpper()
+        $DDrive = $DPath.substring(0, 2).ToUpper()
 
         $SDriveDetected = Test-Path $SDrive
         Write-Verbose "Results of Test-Path for source drive $SDrive = $SDriveDetected"
@@ -373,10 +373,10 @@ function Assert-ValidDrivesAndPaths {
         $SPathDetected = Test-Path $SPath
         Write-Verbose "Results of Test-Path for source path $SPath = $SPathDetected"
 
-        if (-not $SDriveDetected -and ([String]$SDrive[0]).ToUpper() -notin $ErrorData.Drives) {
-            Write-Verbose "`tSource drive ""$(([String]$SDrive[0]).ToUpper())"" not detected"
+        if (-not $SDriveDetected -and $SDrive[0] -notin $ErrorData.Drives) {
+            Write-Verbose "`tSource drive ""$($SDrive[0])"" not detected"
             $DriveErrors = $true
-            $ErrorData.Drives += ([String]$SDrive[0]).ToUpper()
+            $ErrorData.Drives += $SDrive[0]
         }
         elseif (-not $SPathDetected) {
             # -and $SPath -notin $ErrorData.Paths
@@ -391,8 +391,10 @@ function Assert-ValidDrivesAndPaths {
         if (-not $DDriveDetected -and ([String]$DDrive[0]).ToUpper() -notin $ErrorData.Drives) {
             Write-Verbose "`tDestination drive ""$(([String]$DDrive[0]).ToUpper())"" not detected"
             $DriveErrors = $true
-            $ErrorData.Drives += ([String]$DDrive[0]).ToUpper()
+            $ErrorData.Drives += $DDrive[0]
         }
+        
+        Write-Verbose ""
     }
 
     if ($DriveErrors) {
@@ -409,9 +411,10 @@ function Assert-ValidDrivesAndPaths {
         $NumJobsHaveErrors = $ErrorData.Paths | Select-Object JobName -Unique | Measure-Object | Select-Object -ExpandProperty Count
         $Message = $NumJobsHaveErrors -gt 1 ? $Message.Replace("<2>", 's') : $Message.Replace("<2>", '')
         Write-Host $Message
+
         $ErrorData.Paths.foreach({
-                Write-Host "`tCan't $($_.ProcessType)$(if($_.ProcessType -eq $JobOperations.Restore){" from"}) the directory `"$($_.Source)`" for the job `"$($_.JobName)`" because it doesn't exist." #the $_ means itself or current item
-            })
+            Write-Host "`tCan't $($_.ProcessType)$(if($_.ProcessType -eq $JobOperations.Restore){" from"}) the directory `"$($_.Source)`" for the job `"$($_.JobName)`" because it doesn't exist." #the $_ means itself or current item
+        })
     }
     
     if ($DriveErrors -or $PathErrors) { Write-Host "`nPossible fixes for the above error(s):" }
