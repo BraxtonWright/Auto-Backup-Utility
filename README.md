@@ -2,7 +2,7 @@
 This Powershell script uses Robocopy and some predefined CSV files to allow you to choose one or more of the CSV files to either backup and/or restore directories/files you defined inside the file.
 
 ## Important Information
-This Powershell script requires Powershell 7 for it to run, so if you don't have at least Powershell 7 installed, then go to the [Powershell Github Repository](https://github.com/PowerShell/PowerShell) and install the most recent version.
+This Powershell script requires at least Powershell 7.4 to be installed for it to run, so if you don't have at least this version installed, then go to the [Powershell Github Repository](https://github.com/PowerShell/PowerShell) and install the most recent version.
 
 ## Startup Instructions
 To start the script, run the PowerShell script "Start.ps1" in any Powershell terminal or "AutoBackup.ps1" in a Powershell 7 terminal.

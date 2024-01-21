@@ -1,33 +1,33 @@
-﻿# This will prevent the script from running unless the user is running the script in at least powershell version 7.0 https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_requires?view=powershell-7.3#-version-nn
-#Requires -Version 7.0
+# This will prevent the script from running unless the user is running the script in at least powershell version 7.4 because of the use of "-CaseInsensitive" flag inside the Helper-Functions.psm1 file https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_requires?view=powershell-7.3#-version-nn
+#Requires -Version 7.4
 
-# To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 file, you have to go to that file and uncomment the same line of code)
-# $VerbosePreference = "continue"
+# To enter debugging mode, uncomment the following line (will not be applied to the Helper-Functions.psm1 and UI-FUnctions.psm1 files, you have to go each of the files and uncomment the same line of code near the top)
+# $VerbosePreference = "Continue"
 
 #region Library Importing
-Import-Module -DisableNameChecking $PSScriptRoot\util\Helper-Functions.psm1
+Import-Module -DisableNameChecking $PSScriptRoot'\util\Helper-Functions.psm1'
+Import-Module -DisableNameChecking $PSScriptRoot'\util\UI-Functions.psm1'
 #endregion
 
-#region Global variables used / Pre-configuring
+#region Variables and Pre-configuring
 # the @() defines an array
-$YesNoCharAnswer = @('Y', 'y', 'N', 'n')
-$NoCharAnswer = @('N', 'n')
-$YesCharAnswer = @('Y', 'y')
-$QuitCharAnswer = @('Q', 'q')
-$BackCharAnswer = @('B', 'b')
-$ClearCharAnswer = @('C', 'c')
-# The below variable is also used inside the file Helper-Functions.psm1.  However, for some reason that file pulls this variable into itself so you can use it there as well?
-$JobOperations = @{
+$noAnswer = @('N', 'n')
+$yesAnswer = @('Y', 'y')
+$yesNoAnswer = $yesAnswer + $noAnswer
+$quitAnswer = @('Q', 'q')
+$backAnswer = @('B', 'b')
+$clearContinueAnswer = @('C', 'c')
+# The below variable is also used inside the file "Helper-Functions.psm1" file.  However, for some reason that file pulls this variable into itself so you can use it there as well?
+$jobOperations = @{
     Backup  = "backup"
     Restore = "restore"
 }
 # The reason for having $Global in front of some variables are not in others is because those that have this identifier can be modified inside function calls.  Explanation for this found here https://stackoverflow.com/questions/30590972/global-variable-changed-in-function-not-effective and here https://techgenix.com/powershell-global-variable
-$MaxThreadsNumber = Get-MaxThreads
-$Global:UDThreadUsage = $Null
-Write-Host "Getting all available jobs from the ""Jobs"" folder..."
-$AvailableJobs = Get-AvailableJobs # an array of objects
-$JobsContent = Get-JobsContent $AvailableJobs # a hashtable of file names and file contents (which is an array containing PSCustomObjects)
-$Global:JobCount = 0
+$robocopyMaxThreads = 128
+$maxSystemThreads = Get-SystemThreadCount
+$Global:userDefinedThreads = $null
+$availableJobs = Get-JobsFromJobFolder
+$Global:selectedJobsCount = 0
 
 <#
  This is added because after PowerShell 7.2, it introduced this new variable and it is set to 'Minimal' by default.
@@ -40,455 +40,401 @@ $Host.PrivateData.ProgressBackgroundColor = 'Cyan'
 $Host.PrivateData.ProgressForegroundColor = 'Black'
 #endregion
 
-#region Screen Functions
+#region Notes
+# Powershell doesn't have a normal scopes as do most programming languages.  It has three levels, Global, Script, and Local and when you run functions defined in this file, it is in the "Script" level.  That means that you can reference any varaible defined in a function, regardless on if it was created inside a subscope such as an if statment or not https://www.varonis.com/blog/powershell-variable-scope
+# To add the help section as shown below for the functions, you simply need to type out "help-function" (doesn't auto grab function arguments) or "##" (auto grabs function arguments) and it will create a template that you can fill out with your required information. https://stackoverflow.com/questions/72643685/autodocstring-for-powershell-functions
+#endregion
+
 <#
 .SYNOPSIS
-    Main menu for the script
-
+    Displays the main menu for this script.
 .DESCRIPTION
-    The main menu for the script so the user can get started with the backup/restoring of files
-
-.NOTES
-    This function takes no arguments
-
+    This will display a menu where the user can chose one of three options to navigate to.  Select jobs, define thread count to be used, or get the job summary/start the backup/restore process.
 .EXAMPLE
     Get-MainScreen
-    Displays the main menu that the user can interact with to either backup or restore files
+.NOTES
+    N.A.
 #>
 function Get-MainScreen {
-    [CmdletBinding()]
-    param ()
-
     do {
-        Clear-Host
+        Get-MainScreenUI -numberOfJobsSelected $Global:selectedJobsCount
 
-        Write-Host "================================================================================
-        `rWelcome to the RoboCopy backup script utility.  This script will back-up/restore
-        `rfiles using the CSV files defined inside this project's `"Jobs`" folder.
-        `r================================================================================"
+        $userInput = Read-Host "`nSelection or 'Q'uit"
 
-        Write-Host "`nSelect one of the items below to start configuring what you want to do."
-        
-        $UserInput = ""
-        Write-Host "(1) Select Operations/Jobs
-        `r(2) Define Thread count"
-        if ($Global:JobCount -eq 0) {
-            Write-Host "(Locked) Show work summary/Start work" -ForegroundColor DarkGray  
+        # The below condition inside the switch statment will convert the user input to an it if it can be converted otherwise, it will be null https://stackoverflow.com/questions/69500314/checking-if-a-string-can-cannot-be-converted-to-int-float
+        switch ($userInput -as [int]) {
+            1 { Select-JobProcess }
+            2 { Get-UserDefinedThreads }
+            3 { if ($Global:selectedJobsCount -ne 0) { Get-BackupRestoreSummaryScreen } }
         }
-        else {
-            Write-Host "(3) Show work summary/Start work"
-        }
-
-        $UserInput = Read-Host "`nSelection or 'Q'uit"
-
-        if ($UserInput -as [int] -is [int]) {
-            switch ([int]$UserInput) {
-                1 { Select-JobOperation }
-                2 { Get-UserDefinedThreads }
-                3 { if ($Global:JobCount -ne 0) { Get-BackupDataScreen } }
-            }
-        }
-    } While ($QuitCharAnswer -notcontains $UserInput)
+    } while ($userInput -notin $quitAnswer)
 
     Clear-Host
+
+    # We don't have to call the below function in production but I am keeping it here because when you leave this function, it will automaticly terminate the script.
+    Exit-ScriptDeployment
 }
 
-#region Backup/restore screens
 <#
 .SYNOPSIS
-Select either to backup or restore a job
-
+    Displays the screen the user uses to either backup or restore jobs.
 .DESCRIPTION
-You will select one of two options that will take you into a menu to define a job as backing up or restoring
-
+    This will display a menu where the user can select one of two options.  Select jobs to be backed up or select jobs to be restored.
 .EXAMPLE
-Select-JobOperation
-
+    Select-JobProcess
 .NOTES
-N.A.
+    N.A.
 #>
-function Select-JobOperation {
-    [CmdletBinding()]
-    param ()
-
+function Select-JobProcess {
     do {
-        Clear-Host
+        Get-JobProcessUI
+        
+        $userInput = Read-Host "`nSelection or 'B'ack"
 
-        Write-Host "Here are a list of operations that this script can do.  Type the number for the operation to add/remove jobs to the operation.
-        `r(1) Backup
-        `r(2) Restore"
-
-        $UserInput = Read-Host "`nSelection or 'B'ack"
-        Write-Verbose "User input is an int: $($UserInput -as [int] -is [int])"
-        if ($UserInput -as [int] -is [int]) {
-            if ([int]$UserInput -eq 1) {
-                Write-Verbose "Running the command ""Select-Jobs -Operation $($JobOperations.Backup)"""
-                Select-Jobs -Operation $JobOperations.Backup
-            }
-            elseif ([int]$UserInput -eq 2) {
-                Write-Verbose "Running the command ""Select-Jobs -Operation $($JobOperations.Restore)"""
-                Select-Jobs -Operation $JobOperations.Restore
-            }
+        # The below condition inside the switch statment will convert the user input to an it if it can be converted otherwise, it will be null https://stackoverflow.com/questions/69500314/checking-if-a-string-can-cannot-be-converted-to-int-float
+        switch ($userInput -as [int]) {
+            1 { Select-Jobs $jobOperations.Backup }
+            2 { Select-Jobs $jobOperations.Restore }
         }
-    } While ($BackCharAnswer -notcontains $UserInput)
+    } While ($userInput -notin $backAnswer)
 }
 
 <#
 .SYNOPSIS
-Select a job you want to perform
-
+    Displays a screen that the user uses to select jobs.
 .DESCRIPTION
-Allows you to select from a list of jobs to either backup or restore files from that job
-
-.PARAMETER Operation
-Either "backup" or "restore"
-
+    This will display all available jobs "CSV files" defined inside the "Jobs" folder so the user can select them.
+.PARAMETER operation
+    The operation you wish to perform when selecting the jobs, such as "backup" or "restore".
 .EXAMPLE
-Select-Jobs -operation "backup"
-Select-Jobs "restore"
-
+    Select-Jobs "backup"
+.Example
+    $jobOperations = @{
+        Backup  = "backup"
+        Restore = "restore"
+    }
+    Select-Jobs $jobOperations.Backup
 .NOTES
-N.A.
+    Designed to accept only two types of operations, either backup or restore
 #>
 function Select-Jobs {
     [CmdletBinding()]
     param
     (
-        [Parameter(Mandatory, Position = 0)] [string] $Operation
+        [Parameter(Mandatory, Position = 0)] [string] $operation
     )
+    Write-Verbose "Argument supplied for `"Select-Jobs`": $operation"
+
     do {
-        Clear-Host
+        Get-SelectJobsUI $operation ($availableJobs | Select-Object JobName, JobOperation)
 
-        Write-Host "Here are a list of jobs that this script can do for the $Operation operation.  Type the number of the item to add/remove the job to the queue.
-        `rNote:  Jobs marked as 'Locked' are because they are being used by the other operation defined."
-
-        $ItemNumber = 1
-        foreach ($Job in $AvailableJobs) {
-            if ($Job.JobOperation -eq $Operation) {
-                Write-Host "[X] ($ItemNumber) $($Job.Name)"
-            }
-            elseif ([String]::IsNullOrEmpty($Job.JobOperation)) {
-                Write-Host "[ ] ($ItemNumber) $($Job.Name)"
-            }
-            else {
-                Write-Host "[Locked] ($ItemNumber) $($Job.Name)" -ForegroundColor DarkGray
-            }
-            $ItemNumber += 1
-        }
-        $UserInput = Read-Host "`nIndex or go 'B'ack"
-        Write-Verbose "User input is an int: $($UserInput -as [int] -is [int])"
-        $UserInputInt = 0
-        if ($UserInput -as [int] -is [int]) {
-            $UserInputInt = [int]$UserInput
-        }
-        Write-Verbose "The user input is between 1 and $($AvailableJobs.count): $($UserInputInt -in 1..$AvailableJobs.count)"
+        $userInput = Read-Host "`nIndex or go 'B'ack"
+        $intUserInput = $userInput -as [int] # Convert the user input to an it if it can be converted otherwise, it will be null https://stackoverflow.com/questions/69500314/checking-if-a-string-can-cannot-be-converted-to-int-float
+        
+        Write-Verbose "The user input is between 1 and $($availableJobs.Count): $($intUserInput -in 1..$availableJobs.Count)"
         # The user input is the valid range for the selection
-        if ($UserInputInt -in 1..$AvailableJobs.count) {
-            Write-Verbose "Before change:  $($AvailableJobs[$UserInputInt - 1].JobOperation)"
-            if ([String]::IsNullOrEmpty($AvailableJobs[$UserInputInt - 1].JobOperation)) {
-                $AvailableJobs[$UserInputInt - 1].JobOperation = $Operation
-                $Global:JobCount += 1
+        if ($intUserInput -in 1..$availableJobs.Count) {
+            Write-Verbose "Before change:  $($availableJobs[$intUserInput - 1].JobOperation)"
+            if ([String]::IsNullOrEmpty($availableJobs[$intUserInput - 1].JobOperation)) {
+                $availableJobs[$intUserInput - 1].JobOperation = $operation
+                $Global:selectedJobsCount++
             }
-            elseif ($AvailableJobs[$UserInputInt - 1].JobOperation -eq $Operation) {
-                $AvailableJobs[$UserInputInt - 1].JobOperation = $Null
-                $Global:JobCount -= 1
+            elseif ($availableJobs[$intUserInput - 1].JobOperation -eq $operation) {
+                $availableJobs[$intUserInput - 1].JobOperation = $Null
+                $Global:selectedJobsCount--
             }
-            Write-Verbose "After change:  $($AvailableJobs[$UserInputInt - 1].JobOperation)"
+            Write-Verbose "After change:  $($availableJobs[$intUserInput - 1].JobOperation)"
         }
-    } while ($BackCharAnswer -notcontains $UserInput)
+    } while ($userInput -notin $backAnswer)
 }
-#endregion
 
 <#
 .SYNOPSIS
-Open a menu to define the number of threads to use
-
+    Displays a screen that the user uses define/undefine the number of threads to use for the selected jobs.
 .DESCRIPTION
-Open a menu for the user to defines the number of threads that the job is to use 
-
+    This will display an optional screen where the user can chose how many threads they want the script to use when either backing up or restoring files defined inside the jobs.
 .EXAMPLE
-Get-UserDefinedThreads
-
+    Get-UserDefinedThreads
 .NOTES
-N.A.
+    This is an optional screen.  If the user doesn't define the number of threads, it will use the default for robocopy "8"
 #>
 function Get-UserDefinedThreads {
-    [CmdletBinding()]
-    param ()
+    $firstStartUp = $true
+    $maxAllowedThreads = $maxSystemThreads -le $robocopyMaxThreads ? $maxSystemThreads : $robocopyMaxThreads
+    $threadsConfigured = -not [string]::IsNullOrEmpty($Global:userDefinedThreads)
+    $validUserInput = [string]::IsNullOrEmpty($Global:userDefinedThreads) ? $backAnswer : $backAnswer + $clearContinueAnswer
 
-    $UserInput = $Null
-    $FirstStartUp = $True
     do {
-        Clear-Host
+        Get-UserDefinedThreadsUI $maxSystemThreads $Global:userDefinedThreads $robocopyMaxThreads
 
-        Write-Host "================================================================================
-        `rHere you type a number between 1-$(if($MaxThreadsNumber -gt 128){128}else{$MaxThreadsNumber}) so this script can use that number of
-        `rthreads for the backup process.
-        `n`rIMPORTANT NOTES:
-        `r1.  You don't need to worry if the default is greater than your processor's max
-        `r    thread count, it will limit itself to your system's capabilities.
-        `r2.  The max thread count that this script can handle is 128 threads.
-        `r================================================================================"
+        # If it is not the first time here, validate the user's input
+        if (-not $firstStartUp) {
+            # Checks to see if the user input is a integer or a valid input
+            if ($intUserInput -isnot [int] -and $userInput -notin $validUserInput) {
+                Write-Verbose "Failing Condition:
+                `r`tInput not an integer: $($intUserInput -isnot [int])
+                `r`tInput is not 'C'lear or 'B'ack: $($userInput -notin $validUserInput)"
 
-        Write-Host `n$(if([String]::IsNullOrEmpty($Global:UDThreadUsage)){"Currently using default thread count: 8"}else{"Currently using user defined thread count: $Global:UDThreadUsage"})`n
-
-        #checks to see if the input is a integer
-        if (-not $FirstStartUp -and ([String]::IsNullOrEmpty($UserInput) -or -not ($UserInput -as [int] -is [int]) -and ($UserInput -ne "b" -and $UserInput -ne "B" -and $UserInput -ne "c" -and $UserInput -ne "C"))) {
-            Write-Verbose "Failing Condition:"
-            Write-Verbose "First startup: $FirstStartUp"
-            Write-Verbose "Input is Null/Emtpy: $([String]::IsNullOrEmpty($UserInput))"
-            Write-Verbose "Input an integer: $(-not ($UserInput -as [int] -is [int]))"
-            Write-Verbose "Input is not 'b', 'B', or 'CLEAR': $(-not ($UserInput -eq "b" -or $UserInput -eq "B" -or $UserInput -eq "CLEAR"))"
-            
-            Write-Host "ERROR:  Your input `"$UserInput`" is not an integer."
-        }
-        #checks to see if input (which is an integer) is between 1 and the maximum number of threads for the system or 128 (that max thread count that RoboCopy can handle)
-        elseif (-not $FirstStartUp -and ($UserInput -as [int] -le 0 -or $UserInput -as [int] -gt $MaxThreadsNumber -or $UserInput -as [int] -gt 128)) {
-            Write-Host "ERROR:  " -NoNewline
-            if ($UserInput -as [int] -gt 128) {
-                Write-Host "The max thread count that this script can handle is 128 threads."
+                Write-Host "ERROR:  Your input `"$userInput`" is not an integer."
             }
-            else {
-                Write-Host "Your input `"$UserInput`" is out of the capabilities of your system."
+            # Checks to see if input (which is an integer) is between 1 and the maximum number of threads for the system or 128 (the max thread count that RoboCopy can handle)
+            elseif ($intUserInput -notin 1..$maxAllowedThreads) {
+                if ($intUserInput -gt $robocopyMaxThreads) { Write-Host "ERROR:  The max thread count that robocopy can handle is $robocopyMaxThreads threads." }
+                else { Write-Host "ERROR:  Your input `"$intUserInput`" is outside the capabilities of your system." }
             }
         }
 
-        $FirstStartUp = $False
+        $firstStartUp = $false
 
-        $UserInput = Read-Host -Prompt "Number of threads, 'C'lear, or 'B'ack"
-        $UserInputInt = $UserInput -as [int]
-    } while ((-not ($UserInputInt) -or ($UserInputInt -le 0 -or $UserInputInt -gt $MaxThreadsNumber -or $UserInputInt -gt 128)) -and ($BackCharAnswer -notcontains $UserInput -and $ClearCharAnswer -notcontains $UserInput))
+        $inputPrompt = "Number of threads<1> or go 'B'ack"
+        $inputPrompt = $threadsConfigured ? $inputPrompt.Replace("<1>", ", 'C'lear,") : $inputPrompt.Replace("<1>", '')
 
-    if ($UserInput -as [int] -is [int]) {
-        $Global:UDThreadUsage = [int]$UserInput
+        $userInput = Read-Host -Prompt $inputPrompt
+        $intUserInput = $userInput -as [int]
+        # Do while ((user's input is not an integer) OR (the integer user input is not in the valid range)) AND (the user's input is not 'C'lear or go 'B'ack)
+    } while (($intUserInput -isnot [int] -or $intUserInput -notin 1..$maxAllowedThreads) -and $userInput -notin $validUserInput)
+
+    if ($intUserInput -is [int]) {
+        $Global:userDefinedThreads = $intUserInput
     }
-    elseif ($ClearCharAnswer.Contains($UserInput)) {
-        $Global:UDThreadUsage = $Null
+    elseif ($userInput -in $clearContinueAnswer) {
+        $Global:userDefinedThreads = $Null
     }
 }
 
 <#
 .SYNOPSIS
-Display a summary of the selected jobs before it starts processing
-
+    Displays a summary screen for the jobs selected.
 .DESCRIPTION
-This will display a small summary of the jobs you selected and what the script will do when processing them.
-It will also warn the user that the process will overwrite\delete any files that do or do not exist inside the other folder 
+    This will display the summary screen for the jobs selected and will tell the users what drives are required for the selected jobs and a brief table telling where the jobs will be copying to/from.
+    Then if the user chooses to continue, it will check to make sure that all the required drives are connected and source paths exist before continuing.
 
+    If it is unable to detect a required drive, then it will show the drive(s) that it was unable to detect and ask the user to connect the drive and have the script check again.
+    If however, it is unable to detect a source path, it will then show the source paths it was unable to detect and then will ask the user if they want to continue with the process by excluding source paths it couldn't find.  This is because in some instances, this is an expected result because the either the OS might have not created the source directory when performing a backup operation or it hasn't been backed up yet when performing a restore operation.
 .EXAMPLE
-Get-BackupDataScreen
-
+    Get-BackupRestoreSummaryScreen
 .NOTES
-WIP: I need to make it so that this function displays what drive letters it needs and use the Test-Path cmdlet to see if the Drives are connected and test to see if the source exist to be processed
+    If a job is being restored, this function will automaticaly swap all the "Source" and "Destination" properties of the selected job inside the property stored inside of "$availableJobs.JobContent"
 #>
-function Get-BackupDataScreen {
-    [CmdletBinding()]
-    param ()
+function Get-BackupRestoreSummaryScreen {
+    Clear-Host # We add this here because we call the UI function after we process all the data
 
-    $JobsToProcess = $AvailableJobs | Where-Object JobOperation -ne $Null | Sort-Object JobOperation, Name # This only gets the jobs that have been queued and sorts first by the JobOperation then by the job's Name
-    $ExtractedJobData = @() # This will hold the array of Source and destination drives used check to see if they are connected or exists
-    foreach ($Job in $JobsToProcess) {
-        $ExtractedJobData += $JobsContent.$($Job.Name) | ForEach-Object {
-            [PSCustomObject]@{
-                JobName        = $Job.Name
-                JobOperation   = $Job.JobOperation
-                Source         = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Source : $_.Destination)
-                Destination    = ($Job.JobOperation -ne $JobOperations.Restore ? $_.Destination : $_.Source)
-                JobDescription = $_.Description
-                FileMatching   = $_.FileMatching
+    # Make a deep copy of the jobs that have been queued and sorts them by JobOperation first then by JobName property
+    $jobsToProcess = $availableJobs | Where-Object JobOperation -ne $Null | ForEach-Object {
+        [PSCustomObject]@{
+            JobName      = $_.JobName
+            JobOperation = $_.JobOperation
+            JobContent   = $_.JobContent | ForEach-Object {
+                [PSCustomObject]@{
+                    Source       = $_.Source
+                    Destination  = $_.Destination
+                    Description  = $_.Description
+                    FileMatching = $_.FileMatching
+                }
+            }
+        }
+    } | Sort-Object JobOperation, JobName
+    Write-Verbose "Jobs selected to be processed (for debugging):
+    $($jobsToProcess | Format-Table | Out-String)"
+    # $jobsToProcess | Out-File -Width 1000 ./test.txt # for debugging only to see the formatted contents
+
+    # Go through each entry and if we are restoring in the job, then swap the source and destination paths.
+    # The -Parallel flag used below will have this action run in Parallel. To reference the current object, use $PSItem and to bring in outside variables, use $USING:varname
+    $jobsToProcess | Foreach-Object -Parallel {
+        if ($PSItem.JobOperation -eq $USING:jobOperations.Restore) {
+            $PSItem.JobContent | ForEach-Object -Parallel {
+                Write-Verbose "Swapping the source and destinations paths for the entry: $PSItem"
+                $PSItem.Source, $PSItem.Destination = $PSItem.Destination, $PSItem.Source # This uses multiple assignments to swap the contents of the two variables https://powershellmagazine.com/2013/08/07/pstip-swapping-the-value-of-two-variables/
             }
         }
     }
 
-    $RequiredDrives = Get-RequiredDrives -Paths $($ExtractedJobData | Select-Object Source, Destination)
-    Write-Verbose "RequiredDrives returned: $($RequiredDrives -join ', ')"
+    Write-Verbose "Jobs after being processed (for debugging):
+    `r`t $($jobsToProcess | Format-Table | Out-String)"
+
+    # This function call is formatted this way so that it will supply a single array of PSCustomObjects with the properties "Source" and "Destination"
+    $requiredDrives = Get-RequiredDrives ($jobsToProcess | ForEach-Object { $_.JobContent | Select-Object Source, Destination })
+    $compressedToFrom = Compress-RootDriveToFrom $jobsToProcess
 
     do {
-        Clear-Host
-        
-        Write-Host "================================================================================
-        `rYou are about to start the backup process for this script.  Please read the
-        `rfollowing summary to validate your options and see what drives are required.
-        `r================================================================================`n"
+        Get-BackupRestoreSummaryScreenUI $requiredDrives $compressedToFrom
+    
+        $userInput = Read-Host -Prompt "Do you want to continue with the process 'Y'es or 'N'o"
+        if ($userInput -in $yesAnswer) {
+            $UserInput = Read-Host -Prompt "This is a final confirmation, do you want to continue 'Y'es or 'N'o"
+        }
+    } while ( $userinput -notin $yesNoAnswer)
 
-        Write-Host "This script will require the following drives to be active before processing:
-        `r`t$($RequiredDrives -join ", ")`n"
+    # Start backup process if the paths are valid
+    if ($userInput -in $yesAnswer) {
+        do {
+            $returned = Assert-PathsValid $jobsToProcess
+            if (-not $returned.AllValid) {
+                Get-BackupRestoreErrorScreenUI ($returned | Select-Object CanContinue, DriveErrors, PathErrors)
 
-        $JobDescriber = ""
-        foreach ($Job in $JobsToProcess) {
-            if ($JobDescriber -ne $Job.JobOperation) {
-                Write-Host "This script will $($Job.JobOperation) the following:"
-                $JobDescriber = $Job.JobOperation
-            }
-            Write-Host "`t$($Job.Name)"
-
-            # $SourceDestinations = $ExtractedJobData | Where-Object $_.JobName -eq $Job.Name | Select-Object Source, Destination
-            $CopyFromTo = Get-UniqueDriveToFrom -SourceDestinations $($ExtractedJobData | Where-Object JobName -eq $Job.Name | Select-Object Source, Destination)
-            foreach ($Entry in $CopyFromTo) {
-                # If the Destination is an array object, then make it more readable by adding a ', ' after every drive letter
-                $Message = "`t`tCopying from the drive<1> <2> to the drive<3> <4>"
-                if ($Entry.Destination -is [array]) {
-                    Write-Verbose "$($Entry.Source) -> $($Entry.Destination -join ', ')"
-                    $Message = $Message.Replace('<1>', '')
-                    $Message = $Message.Replace('<2>', $($Entry.Source))
-                    $Message = $Message.Replace('<3>', $(if ($Entry.Destination.Length -gt 1) { 's' }else { '' }))
-                    $Message = $Message.Replace('<4>', $($Entry.Destination -join ', '))
-                    Write-Host $Message
+                if ($returned.CanContinue) {
+                    $UserInput = Read-Host "'C'ontinue or go 'B'ack to the main menu"
                 }
                 else {
-                    Write-Verbose "$($Entry.Source  -join ', ') -> $($Entry.Destination)"
-                    $Message = $Message.Replace('<1>', $(if ($Entry.Source.Length -gt 1) { 's' }else { '' }))
-                    $Message = $Message.Replace('<2>', $($Entry.Source -join ', '))
-                    $Message = $Message.Replace('<3>', '')
-                    $Message = $Message.Replace('<4>', $($Entry.Destination))
-                    Write-Host $Message
+                    $UserInput = Read-Host "Press ENTER to re-evaulate the data or go 'B'ack to the main menu"
                 }
             }
+            $validUserInput = $returned.CanContinue ? $clearContinueAnswer + $backAnswer : $backAnswer
+        } while (-not $returned.AllValid -and $userInput -notin $validUserInput)
+
+        if ($returned.AllValid -or $userInput -in $clearContinueAnswer) {
+            # NEED TO SEE IF THERE IS A PERFORMANCE HIT USING THE ROBOCOPYPIPE FUNCTION
+            # use the Measure-Command cmdlet to achieve this
+            Start-Backup $jobsToProcess
+            Exit-ScriptDeployment
         }
-
-        Write-Host "`nWARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder."
-
-        $UserInput = Read-Host -Prompt "Do you want to continue with the process 'Y'es or 'N'o"
-
-        if ($YesCharAnswer.Contains($UserInput)) {
-            $UserInput = Read-Host -Prompt "This is a final confirmation of your input 'Y'es or 'N'o"
-        }
-    }while ($YesNoCharAnswer -notcontains $UserInput)
-    
-    if ($YesCharAnswer.Contains($UserInput)) {
-        do {
-            Clear-Host
-
-            $PathsAreValid = Assert-ValidDrivesAndPaths -PathsToProcess $($ExtractedJobData | Select-Object Source, Destination, JobOperation, JobName)
-            $ExtractedJobData | ForEach-Object { Write-Verbose $_ }
-            if ($PathsAreValid) {
-                #NEED TO SEE IF THERE IS A PERFORMANCE HIT USING THE TIME REMAINING FUNCTION
-                #use the Measure-Command cmdlet to achieve this
-                Start-Backup -JobsData $ExtractedJobData
-                exit 1  #stop the program
-            }
-            else {
-                $UserInput = Read-Host "Press any key to continue or press 'B'ack to go back to the main menu"
-            }
-        } while ($BackCharAnswer -notcontains $UserInput)
     }
 }
-#endregion
 
-#region Perform backup
 <#
 .SYNOPSIS
-Start the backup process
-
+    Start the process of backing up and/or restoring files inside the selected jobs.
 .DESCRIPTION
-Start up the backup process given the supplied job data
-
-.PARAMETER JobsData
-The job data to copy from/to
-
+    This will start the process of backing up and/or restoring the files defined inside the jobs the user has selected from the "Source" property to the "Destination" property.
+.PARAMETER jobsToProcess
+    An array of PSCustomObjects that follow the below format that this function will read from to perform the backup or restore
+    @{
+        JobName = "Name of the job"
+        JobOperation = "either 'backup' or 'restore'"
+        JobContent = [System.Collections.Generic.List[PSCustomObject]]@() # this contains an list of PSCustomObjects with the following properties "Source", "Destination", "Description", and "FileMatching"
+    }
 .EXAMPLE
-Start-Backup -JobsData $JobsData
+    $jobsToProcess = @(
+        [PSCustomObject]@{
+            JobName = "Job1"
+            JobOperation = "backup"
+            JobContent = @(
+                [PSCustomObject]@{
+                    Source       = "C:/Folder 1"
+                    Destination  = "C:/Folder 2"
+                    Description  = "Mirroring Folder 1 to Folder 2"
+                    FileMatching = ''
+                }
+            )
+        },
+        [PSCustomObject]@{
+            JobName = "Job2"
+            JobOperation = "restore"
+            JobContent = @(
+                [PSCustomObject]@{
+                    Source       = "C:/Folder 3"
+                    Destination  = "C:/Folder 4"
+                    Description  = "Copying all .exe and .png files from Folder 3 to Folder 4"
+                    FileMatching = '*.exe/*.png'
+                },
+                [PSCustomObject]@{
+                    Source       = "C:/Folder 5"
+                    Destination  = "C:/Folder 6"
+                    Description  = "Mirroring Folder 5 to Folder 6"
+                    FileMatching = ''
+                }
+            )
+        }
+    )
 
+    Start-Backup $jobsToProcess
 .NOTES
-(WIP) Need to make it so that $JobsData only contains the source and destination paths
+    This function doesn't swap the "Source" and "Destination" properties stored inside of "JobContent" if you are restoring.  This is done inside the function "Get-BackupRestoreSummaryScreen" when the summary is being displayed.
+    This function will count the number of UNIQUE files in the source and destination paths before it starts the backup.  It stores the nubmer of UNIQUE files inside a new property "EntryFileCount" for each PSCustomObject inside of "JobContent" for each entry inside the job.
 #>
 function Start-Backup {
     [CmdletBinding()]
-    param
-    (
-        [Parameter(Mandatory, Position = 0)] [PSCustomObject] $JobsData
+    param (
+        [Parameter(Mandatory, Position = 0)] [PSCustomObject] $jobsToProcess
     )
+
+    Clear-Host
+    Write-Verbose "Argument supplied for `"Start-Backup`": $($jobsToProcess | Format-Table | Out-String)"
+
+    # The number of files for the jobs is stored inside a new property called "EntryFileCount" inside of $jobsToProcess.JobContent.  This property is added during the function "Get-TotalFileCount" for the jobs and we have to pass the entire object stored inside of "JobContent" to the function to have it be added to the reference of "JobContent" instead of a copy of "JobContent"
+    $combinedJobsFileCount = Get-TotalFileCount ($jobsToProcess | ForEach-Object { $_.JobContent })
     
-    $TotalFileCount = Get-TotalFileCount -JobsData $JobsData
-    Write-Verbose "File Count returned: $($TotalFileCount)"
+    Clear-Host
+    Write-Verbose "File Count returned: $($combinedJobsFileCount)"
+    Write-Verbose "Checking to see if the property `"JobContent`" has the new property named `"EntryFileCount`" inside them: $($jobsToProcess | ForEach-Object { $_.JobContent} | Format-Table | Out-String)"
 
     #region Robocopy parameters and what they do
-    # MIR = Mirror mode
-    # E = Copy subdirectories
     # W = Wait time between fails
     # R = Retry times
-    # NP  = Don't show progress percentage in log
     # NDL = Don't log directory names
     # NC  = Don't log file classes (existing, new file, etc.)
     # BYTES = Show file sizes in bytes
     # NJH = Do not display robocopy job header (JH)
     # NJS = Do not display robocopy job summary (JS)
-    # TEE = Display log in stdout AND in target log file
 
-    #$CommonRobocopyParams = '/MIR /NP /NDL /NC /BYTES /NJH /NJS';
-    #(/MIR) (/E) (/IS) (/NP) /NDL /NC /BYTES /NJH /NJS
+    # can or can not be used depending on what the user choses while defining the job files and using this script
+    # MIR = Mirror mode
+    # MT:<n> = Creates multi-threaded copies with n threads
+    # There are more parameters documented here, however they are not needed for this script https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
     #endregion
 
-    #This and the below two varaibles will use what is called splatting to replace the contents of the array/hashtable into a cmdlet https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-    $CommonRoboCopyParams = "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
-
-    $OverallProgressParameters = @{
+    # The below three varaibles will use what is called splatting to replace the contents of the array/hashtable into a cmdlet https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
+    $commonRobocopyParams = "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
+    $overallProgressParameters = @{
         ID               = 0
-        Activity         = "TBD" # $JobOperation -eq $JobOperations.Backup ? "Generating backup for the job ""$JobName""" : "Restoring files for the job ""$JobName"""
-        Status           = "Percent completed: 0%     Estimated time remaining: TDB" # "Percent completed: $OverallCopyPercent%     Estimated time remaining: $TimeToCompletion"
-        PercentComplete  = 0 # $OverallCopyPercent
-        CurrentOperation = "Files copied: 0 / TBD     Files left: TBD" # "Files copied: $(($TotalFilesProcessed + $JobFilesCopied - 1).ToString('N0')) / $($TotalFileCount.ToString('N0'))     Files left: $($OverallFilesLeft.ToString('N0'))"
+        Activity         = "TBD"
+        Status           = "Percent completed: 0%     Estimated time remaining: TDB"
+        PercentComplete  = 0
+        CurrentOperation = "Files copied: 0 / TBD     Files left: TBD"
     }
-
-    $JobProgressParameters = @{
+    $jobProgressParameters = @{
         ParentID         = 0
         ID               = 1
-        Activity         = "TBD" # $JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$JobDescription""" : "Currently restoring: ""$JobDescription"""
-        Status           = "Percent completed: 0%      File size: TBD     Processing file: TBD" # "Percent completed: $FileCopyPercent%      File size: $([string]::Format('{0:N0}', $FileSizeString))     Processing file: $FileName"
-        PercentComplete  = 0 # $FileCopyPercent
-        CurrentOperation = "Copied: 0 / TBD     Files Left: TBD" # "Copied: $(($JobFilesCopied - 1).ToString('N0')) / $($JobFileCount.toString('N0'))     Files Left: $($($JobFilesLeft + 1).ToString('N0'))"
+        Activity         = "TBD"
+        Status           = "Percent completed: 0%      File size: TBD     Processing file: TBD"
+        PercentComplete  = 0
+        CurrentOperation = "Copied: 0 / TBD     Files Left: TBD"
     }
-
     # This object is used for passing additional variables that are required for the function "Get-RobocopyProgress" to work correctly
-    $HelperVariables = @{
-        "TotalFileCount" = $TotalFileCount
-        "JobFileCount"   = "TBD"
-        "FilesProcessed" = -1 # We set it to -1 because inside the function "Get-RobocopyProgress", it will auto increment it by one for when it gets to the first file.  This would result in it saying that a file has been completely proecessed when in reality it is starting to work on the first one
-        "StartTime"      = Get-Date
-    }
-    
-    # Start backing up\restoring the files
-    foreach ($Entry in $JobsData) {
-        Write-Verbose "Job being processed `"$($Entry.JobName)`": $($Entry | Select-Object Source, Destination, JobDescription)"
-
-        $OverallProgressParameters.Activity = $Entry.JobOperation -eq $JobOperations.Backup ? "Generating backup for the job ""$($Entry.JobName)""" : "Restoring files for the job ""$($Entry.JobName)"""
-        $JobProgressParameters.Activity = $Entry.JobOperation -eq $JobOperations.Backup ? "Currently backing up: ""$($Entry.JobDescription)""" : "Currently restoring: ""$($Entry.JobDescription)"""
-        $HelperVariables.JobFileCount = $Entry.FileCount
-
-        # it is a directory we are copying
-        if ([String]::IsNullOrEmpty($Entry.FileMatching)) {
-            if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /MIR $CommonRoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /MIR @CommonRoboCopyParams | Get-RobocopyProgress -OverallProgressParameters $OverallProgressParameters -JobProgressParameters $JobProgressParameters -HelperVariables $HelperVariables
-            }
-            else {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" /MIR /mt:$Global:UDThreadUsage $CommonRoboCopyParams'"
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" /MIR /mt:$Global:UDThreadUsage @CommonRoboCopyParams | Get-RobocopyProgress -OverallProgressParameters $OverallProgressParameters -JobProgressParameters $JobProgressParameters -HelperVariables $HelperVariables
-            }
-        }
-        # It is a set of files we are copying
-        else {
-            # Split the list of allowed file types after every '/'.  In the powershell window if we were to do this command manually, we would have to enclose each one of these file conditions inside a set of quotation marks.  But for some reason, we don't have to do it here and it will not work with them included.
-            $AllowedFileTypes = $Entry.FileMatching -split '/'
-
-            if ([string]::IsNullOrEmpty($Global:UDThreadUsage)) {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $AllowedFileTypes $CommonRoboCopyParams'" # we use the $ instead of the @ as below because the @ can only be used as an argument to a command
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @AllowedFileTypes @CommonRoboCopyParams | Get-RobocopyProgress -OverallProgressParameters $OverallProgressParameters -JobProgressParameters $JobProgressParameters -HelperVariables $HelperVariables
-            }
-            else {
-                Write-Verbose "`tRunning the command 'Robocopy ""$($Entry.Source)"" ""$($Entry.Destination)"" $AllowedFileTypes /mt:$Global:UDThreadUsage $CommonRoboCopyParams'"
-                Robocopy.exe "$($Entry.Source)" "$($Entry.Destination)" @AllowedFileTypes /mt:$Global:UDThreadUsage @CommonRoboCopyParams | Get-RobocopyProgress -OverallProgressParameters $OverallProgressParameters -JobProgressParameters $JobProgressParameters -HelperVariables $HelperVariables
-            }
-        }
-
-        # $ProgressParams.TotalFilesProcessed += $Entry.FileCount
+    $helperVariables = @{
+        TotalFileCount = $combinedJobsFileCount
+        EntryFileCount = $null # To be the contents stored inside of $jobsToProcess.JobContent.EntryFileCount
+        FilesProcessed = -1 # We set it to -1 because inside the function "Get-RobocopyProgress", it will auto increment it by one when it gets to the first file.  If it was 0, when it would start processing the first file, it would result in it saying that the file has been processed when it has not yet been processed.
+        StartTime      = Get-Date
     }
 
-    # Remove the progress bars because occasionally, the progress bars will stay on the terminal after processing the jobs
-    Write-Progress -Id 1 -Activity "Completed" -Completed
-    Write-Progress -Id 0 -Activity "Completed" -Completed
+    $jobsToProcess | ForEach-Object {
+        Write-Verbose "Job being processed: `"$($_ | Select-Object JobName, JobOperation)`""
+
+        $currentJobOperation = $_.JobOperation
+        $overallProgressParameters.Activity = $currentJobOperation -eq $jobOperations.Backup ? "Generating backup for the job `"$($_.JobName)`"" : "Restoring files for the job `"$($_.JobName)`""
+
+        $_.JobContent | ForEach-Object {
+            Write-Verbose "`tCurrent entry being processed $($_)"
+
+            # If the source directory exists, then process it.
+            if (Test-Path $_.Source) {
+                $jobProgressParameters.Activity = $currentJobOperation -eq $jobOperations.Backup ? "Currently backing up: `"$($_.Description)`"" : "Currently restoring: `"$($_.Description)`""
+                $helperVariables.EntryFileCount = $_.EntryFileCount
+
+                #region robocopy parameter processing
+                $toFromPaths = @( $_.Source, $_.Destination )
+                $fileList = $_.FileMatching -split '/' # if there is no entries inside here, it will simply be an empty array which the robocopy executible will ignore
+                $additionalRoboCopyParams = [System.Collections.Generic.List[string]]::new()
+                if ([string]::IsNullOrEmpty($_.FileMatching)) { $additionalRoboCopyParams.Add("/MIR") }
+                if (-not [string]::IsNullOrEmpty($Global:userDefinedThreads)) { $additionalRoboCopyParams.Add("/MT:$Global:userDefinedThreads") }
+                #endregion
+
+                # This will store the robocopy executible and the parameters for robocopy in variables so that we will simply have to call "& $executable $params" to have it be executed https://stackoverflow.com/questions/29562598/powershell-with-robocopy-and-arguments-passing
+                $executable = "Robocopy.exe"
+                $params = $toFromPaths + $fileList + $additionalRoboCopyParams + $commonRobocopyParams
+
+                Write-Verbose "`tRunning the command '$executable $params'"
+                & $executable $params | Get-RobocopyProgress $overallProgressParameters $jobProgressParameters $helperVariables    
+            }
+            else {
+                Write-Verbose "`tSkipping this entry for because the Source directory `"$($_.Source)`" doesn't exist"
+            }
+        }
+    }
+
+    Clear-ProgressScreen
 }
-#endregion
 
 #region Main Code that jump starts the script
 Get-MainScreen
