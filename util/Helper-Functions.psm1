@@ -50,7 +50,7 @@ $localDriveRegex = "[a-zA-Z]:\\"  # Looks for "A-Z:\" captible insensitive.  The
 $folderNameRegex = "(?:[\w -]+\\?)"  # Looks for the name of a folder with or without a '\' at the end
 $remoteDriveRegex = "\\\\($IPV4Regex|[\w -]{1,15})\\$folderNameRegex" # Looks for "\\IPV4Address\FolderName" or "\\Computer_name_max_15_characters\FolderName"
 $rootDirectoryRegex = "^($localDriveRegex|$remoteDriveRegex){1}"  # Looks for either a local drive or a remote drive, but not both https://stackoverflow.com/questions/247167/exclusive-or-in-regular-expression
-$fullPathRegex = "^($localDriveRegex$folderNameRegex*|$remoteDriveRegex$folderNameRegex*)$" # Looks for either the full path to a local or remote folder
+$fullPathRegex = "($rootDirectoryRegex)$folderNameRegex*$" # Looks for either the full path to a local or remote folder
 
 $quitAnswer = @('Q', 'q')
 #endregion
