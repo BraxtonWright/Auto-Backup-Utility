@@ -683,41 +683,12 @@ function Remove-DriveExtraText {
 
 <#
 .SYNOPSIS
-    A new like operator that allows for multiple like conditions in one easy to use function.
-.DESCRIPTION
-    This function will take two arguments, "fileName" and "validFileTypes", and it will then determine if the file matches at least one of the file types supplied.
-.PARAMETER FileName
-    The name of the file you wish to check.
-.PARAMETER ValidFileTypes
-    An array of valid like operators that says the file should be selected.
-.EXAMPLE
-    Compare-FileMatch 'This is a new file.txt' @(This*, *new*, *.txt)
-.NOTES
-    Source for this function but modified how arguments are supplied https://stackoverflow.com/a/13019721
-#>
-function Compare-FileMatch {
-    [CmdletBinding()]
-    param
-    (
-        [Parameter(Mandatory, Position = 0)] [string] $fileName,
-        [Parameter(Mandatory, Position = 1)] [array] $validFileTypes
-    )
-    Write-Verbose "Arguments supplied for `"Compare-FileMatch`":
-    FileName: $fileName
-    ValideFileTypes: $($validFileTypes -join ", ")"
-    
-    # We don't have to inclose the pattern variable inside a set of "" inside the below if statment, they are not required when they are contains inside a variable.  They are only required if you manauly use the like comparison operator inside a terminal in raw text.
-    foreach ($pattern in $validFileTypes) { if ($fileName -like $pattern) { return $true; } }
-    return $false;
-}
-
-<#
-.SYNOPSIS
     A function to count the number of unique files inside the source and destination paths for the selected jobs
 .DESCRIPTION
     This function will count the number of UNIQUE files inside both the source and destination fields for the jobs.  This function will in addition add a new property "EntryFileCount" to the parameter supplied.  So it is required that you pass the entire object to this function instead of selecting only the properties it needs because otherwise the new property will not be added to the argument supplied after this function is done being executed
 .PARAMETER dataToProcess
-    An array of PSCustomObjects with the following properties "Source", "Destination", and "FileMatching".  This function requires that you pass the entire object to this function and not just the required fields.  This is because if you don't, it will add the property "EntryFileCount" to a copy of the data instead of to the reference of the data, thus you lose the information when you leave this function.
+    # Using robocopy for counting the files (easy to read and program)
+    An array of PSCustomObjects with the following properties "JobOperation" and "JobContent".  The property "JobContent" will be an array of PSCustomerObjects with the attributes "Source", "Destination", "FileMatching", "ExcludedFiles", and "ExcludedDirectories".  This function requires that you pass the entire object to this function and not just the required fields.  This is because if you don't, it will add the property "EntryFileCount" to a copy of the data instead of to the reference of the data, thus you lose the information when you leave this function.
 .EXAMPLE
     $dataToBeProcessed = @(
         [PSCustomObject]@{Source = "C:\Folder1"; Destination = "C:\Folder2"; FileMatching = "*.exe"},
@@ -743,88 +714,73 @@ function Get-TotalFileCount {
     Write-Host "Determining how many files are to be processed..."
 
     $totalFileCount = 0
-    $getOnlyFiles = { ($_.GetType().Name -eq "FileInfo") -and ($_.Mode -notmatch 'l') }  # This contains the logic for filtering for the Where-Object so we only have one copy of it.  To use this we simply say "Where-Object { & $GetOnlyFils }"  https://stackoverflow.com/questions/49071951/powershell-cast-conditional-statement-to-a-variable
-
     $dataToProcess | ForEach-Object {
-        #region local variables used below
-        # The below two variables are used for conting the number of unique files
-        $inSourceAndDestination = 0;
-        $inSourceXorDestination = 0;
-        # The below three varaibles are used to store a friendly name to the properties so we can easly reference them inside the below Where-Object and ForEach-Object cmdlets
-        $sPath = $_.Source;
-        $dPath = $_.Destination
-        $allowedFileTypes = $_.FileMatching -split '/'
-        # If the FileMatching property is null or empty, then this will have the -Recurse flag below in the Get-ChildItem cmdlet be executed
-        $useRecursion = [String]::IsNullOrEmpty($_.FileMatching)
+        #region robocopy parameter processing
+        $toFromPaths = @( $_.Source, $_.Destination )
+        $fileList = $_.FileMatching -split '/' # if there is no entries inside here, it will simply be an empty array which the robocopy executable will ignore
+        $excludedFiles = $_.ExcludedFiles -split '/'
+        $excludedDirectories = $_.ExcludedDirectories -split '/'
+        # If the FileMatching property is null or empty, then we are not matching files so we will fetch all files below in the Get-ChildItem cmdlet being executed
+        $notMatchingFiles = [String]::IsNullOrEmpty($_.FileMatching)
         # Split the list of allowed file types after every '/' so we make an array of items
-        $message = "Counting the number of files in the directories<1>
-        `r`tSource: `"$($sPath)`"
-        `r`tDestination: `"$($dPath)`""
+        $message = "Counting the number of files that are different for the directories<1>
+        `r`tSource: `"$($toFromPaths[0])`"
+        `r`tDestination: `"$($toFromPaths[1])`""
         #endregion
-        $message = $useRecursion ? $message.Replace("<1>", '') : $message.Replace("<1>", " that matches one of the following: $($allowedFileTypes -join ", ")")
+        $message = $notMatchingFiles ? $message.Replace("<1>", '') : $message.Replace("<1>", " that matches one of the following: $($fileMatchingPatterns -join ", ")")
         Write-Host $message
 
-        #region Count the files in the source and destinations
-        # We have the below if/else blocks around the Get-ChildItem and inside the ForEach-Object cmdlet because if the source path and/or destination paths don't exist, it will hang for 20-30 seconds attempting to check the items when it should simply skip them.  These if/else blocks will make it so it only processes the entries if it makes sense to do so, I.E. they exist.  This issue is caused by the Get-ChildeItem Cmdlet for when the supplied directory doesn't exist.
-        $sPathExists = Test-Path $sPath
-        $dPathExists = Test-Path $dPath
+        $commonRobocopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/L"  # , "/NJH", "/NJS"
+        $additionalRoboCopyParams = [System.Collections.Generic.List[string]]::new()
+        if ($_.ExcludedFiles -ne '') {
+            $additionalRoboCopyParams.Add("/XF")
+            $excludedFiles | Foreach-Object { $additionalRoboCopyParams.Add($_) }
+        }
+        if ($_.ExcludedDirectories -ne '') {
+            $additionalRoboCopyParams.Add("/XD")
+            $excludedDirectories | Foreach-Object { $additionalRoboCopyParams.Add($_) }
+        }
+        #endregion
 
-        # "-File" means only get files, "-Force" means find hidden/system files, and "-Recurse" means go through all folders
-        # If the source path exists, then go through each file located inside the source directory and check to see if the files exists in the targeted destination directory
-        if ($sPathExists) {
-            Get-ChildItem -Path $sPath -File -Force -Recurse:$useRecursion -ErrorAction SilentlyContinue |
-            Where-Object {
-                if ($useRecursion) { $true } # This will return all files
-                else { (& $getOnlyFiles) -and (Compare-FileMatch $_.Name $allowedFileTypes) }
-            } |
-            ForEach-Object {
-                # If the destiantion directory exists, then check to see if the files exists in that directory
-                if ($dPathExists) {
-                    # The contents of $_ in here is the full path to the SOURCE file
-                    Write-Verbose "Current source item checking: $_"
-                    $dPathToTest = $dPath + $_.FullName.Substring($sPath.Length)
-                    Write-Verbose "Contents of dPathToTest: $dPathToTest"
-                    if (Test-Path $dPathToTest) { $inSourceAndDestination++ }
-                    else { $inSourceXorDestination++ }
+        #region Count the files in the source and destinations
+        # We have the below if/else blocks around the robocopy.exe executable because if the source path doesn't exist, when we should simply skip it.  This if/else blocks will make it so it only processes the entries if it makes sense to do so, I.E. they exist.
+        $sPathExists = Test-Path $toFromPaths[0]
+        $fileCount = 0
+        if($sPathExists) {
+            $executable = "Robocopy.exe"
+            $params = $toFromPaths + $fileList + $commonRobocopyParams + $additionalRoboCopyParams
+
+            $lambdaRobocopyFileDifference = {
+                [CmdletBinding()]
+                param (
+                    [Parameter(Mandatory, ValueFromPipeline)] $inputObject,
+                    [Parameter(Mandatory, Position = 0)] [ref] $robocopyFileCount
+                )
+                    
+                process {
+                    # Write-Verbose "Now inside progress of `"Get-RobocopyFileDifference`" pipe"
+                    #region Robocopy data parsing
+                    $data = $inputObject -split '\x09'  #the \x09 is the ASCII code for "Tab" Source https://buckwoody.wordpress.com/2017/01/18/data-wrangling-regular-expressions/
+                    
+                    # A new file was found, so add 1 to the robocopyFileCount
+                    if (-not [String]::IsNullOrEmpty("$($data[4])")) {
+                        Write-Verbose "New file found inside `"Get-RobocopyFileDifference`" pipe"
+                        $robocopyFileCount.Value++
+                    }
                 }
-                # otherwise, the directory doesn't exist so we simply add to inSourceXorDestination
-                else {
-                    $inSourceXorDestination++
-                }
-            }    
+            }
+
+            Write-Verbose "`tRunning the command to count the number of files '$executable $params'"
+            & $executable $params | & $lambdaRobocopyFileDifference ([ref]$fileCount)
         }
         else {
             Write-Verbose "Skipping source path `"$sPath`" because it doesn't exist"
         }
-
-        # If the source (because if the source doesn't exist, we don't have to process the destination) and destination paths exists, then we will go through each file located inside the destination directory and check to see if the file exists in the targeted source directory
-        if ($sPathExists -and $dPathExists) {
-            Get-ChildItem -Path $dPath -File -Force -Recurse:$useRecursion -ErrorAction SilentlyContinue |
-            Where-Object {
-                if ($useRecursion) { $true } # # This will return all files
-                else { (& $getOnlyFiles) -and (Compare-FileMatch $_.Name $allowedFileTypes) }
-            } |
-            ForEach-Object {
-                # The contents of $_ in here is the full path to the DESTINATION file
-                Write-Verbose "Current destination item checking: $_"
-                $sPathToTest = $sPath + $_.FullName.Substring($dPath.Length)
-                Write-Verbose "Contents of sPathToTest: $dPathToTest"
-                if (-not (Test-Path $sPathToTest)) { $inSourceXorDestination++ }
-            }
-        }
-        else {
-            Write-Verbose "Skipping destination path `"$dPath`" because it doesn't exist"
-        }
-        #endregion
-
-        Write-Verbose "inSourceAndDestination: $inSourceAndDestination
-        `r`tinSourceXorDestination: $inSourceXorDestination
-        `r`tFiles to be processed: $($inSourceAndDestination + $inSourceXorDestination)"
-
-        # Add a new member to the varaible "JobContent" referenced above with it's value being the total number of unique files in the source and destinations
-        $_ | Add-Member -MemberType NoteProperty -Name 'EntryFileCount' -Value ($inSourceAndDestination + $inSourceXorDestination)
         
-        $totalFileCount += $inSourceAndDestination + $inSourceXorDestination
+        # Add a new member to the variable "JobContent" referenced above with it's value being the total number of unique files in the source and destinations
+        $_ | Add-Member -MemberType NoteProperty -Name 'EntryFileCount' -Value $fileCount
+
+        $totalFileCount += $fileCount
     }
     
     Write-Verbose "Total number of files to be processed: $totalFileCount"

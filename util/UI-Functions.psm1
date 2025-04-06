@@ -49,7 +49,7 @@ function Get-MainScreenUI {
     Write-Host "$(Get-UIHeaderDivider)
     `rWelcome to the RoboCopy backup script utility.  This script will back up/restore
     `rfiles using the CSV files defined inside this project's `"Jobs`" folder.
-    `r$(Get-UIHeaderDivider)"
+    `r$(Get-UIHeaderDivider)" -ForegroundColor DarkYellow
 
     Write-Host "`nSelect one of the items below to start configuring what you want to do."
     
@@ -78,8 +78,9 @@ function Get-JobProcessUI {
     Write-Host "$(Get-UIHeaderDivider)
     `rHere are a list of operations that this script can do.  Type the number for the
     `roperation to add/remove jobs to the operation.
-    `r$(Get-UIHeaderDivider)
-    `r
+    `r$(Get-UIHeaderDivider)" -ForegroundColor DarkYellow
+    
+    Write-Host "
     `r(1) Backup
     `r(2) Restore"
 }
@@ -125,12 +126,12 @@ function Get-SelectJobsUI {
     `rNote:
     `rJobs marked as 'Locked' can't be selected because they are being used by the
     `rother operation defined.
-    `r$(Get-UIHeaderDivider)`n"
+    `r$(Get-UIHeaderDivider)`n" -ForegroundColor DarkYellow
 
     $itemNumber = 1
     $availableJobs | ForEach-Object {
         if ($_.JobOperation -eq $operation) {
-            Write-Host "[X] ($itemNumber) $($_.JobName)"
+            Write-Host "[X] ($itemNumber) $($_.JobName)" -ForegroundColor Green
         }
         elseif ([String]::IsNullOrEmpty($_.JobOperation)) {
             Write-Host "[ ] ($itemNumber) $($_.JobName)"
@@ -181,9 +182,9 @@ function Get-UserDefinedThreadsUI {
     `r1.  You don't need to worry if the default is greater than your processor's max
     `r    thread count, it will limit itself to your system's capabilities.
     `r2.  The max thread count that Robocopy can handle is $robocopyMaxThreads threads.
-    `r$(Get-UIHeaderDivider)
-    `r
-    `r$(if($userDefinedThreads){"Currently using user defined thread count: $userDefinedThreads"}else{"Currently using default thread count: 8"})`n"
+    `r$(Get-UIHeaderDivider)" -ForegroundColor DarkYellow
+    
+    Write-Host "$(if($userDefinedThreads){"Currently using user defined thread count: $userDefinedThreads"}else{"Currently using default thread count: 8"})`n"
 }
 
 <#
@@ -236,6 +237,8 @@ function Get-BackupRestoreSummaryScreenUI {
         [Parameter(Mandatory, Position = 1)] [System.Collections.Generic.List[PSCustomObject]] $compressedJobsToFromDrives
     )
 
+    Clear-Host
+
     Write-Verbose "Arguments supplied for `"Get-BackupRestoreSummaryScreenUI`":
     requiredDrives: $($requiredDrives | Format-Table | Out-String)
     compressedJobsToFromDrives: $($compressedJobsToFromDrives | Select-Object JobName, JobOperation, DestinationCompressed | Format-Table | Out-String)
@@ -243,23 +246,24 @@ function Get-BackupRestoreSummaryScreenUI {
 
     # Required drive portion of the below Write-Host
     if ($requiredDrives.Local.Length -gt 0 -and $requiredDrives.Remote.Length -gt 0) {
-        $requiredDrivesmessage = "`tLocal connections: $($requiredDrives.Local -join ', ')
+        $requiredDrivesMessage = "`tLocal connections: $($requiredDrives.Local -join ', ')
         `r`tRemote connections: $($requiredDrives.Remote -join ', ')"
     }
     elseif ($requiredDrives.Local.Length -gt 0 -and $requiredDrives.Remote.Length -eq 0) {
-        $requiredDrivesmessage = "`t$($requiredDrives.Local -join ', ')"
+        $requiredDrivesMessage = "`t$($requiredDrives.Local -join ', ')"
     }
     else {
-        $requiredDrivesmessage = "`t$($requiredDrives.Remote -join ', ')"
+        $requiredDrivesMessage = "`t$($requiredDrives.Remote -join ', ')"
     }
 
     Write-Host "$(Get-UIHeaderDivider)
     `rYou are about to start the backup process for this script.  Please read the
     `rfollowing summary to validate your options and see what drives are required.
-    `r$(Get-UIHeaderDivider)
-    `r
+    `r$(Get-UIHeaderDivider)" -ForegroundColor DarkYellow
+    
+    Write-Host "
     `rThis script will require the following drives to be active before processing:
-    `r$requiredDrivesmessage`n"
+    `r$requiredDrivesMessage`n"
 
     $currentOperation = $null
     $compressedJobsToFromDrives | ForEach-Object {
@@ -293,7 +297,7 @@ function Get-BackupRestoreSummaryScreenUI {
         }
     }
 
-    Write-Host "`nWARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder."
+    Write-Host "`nWARNING:  This script will over-write and/or delete files inside the destination\source folder if the files are out of date or do not exist in the other folder." -ForegroundColor DarkRed
 }
 
 <#
@@ -340,7 +344,7 @@ function Get-BackupRestoreErrorScreenUI {
     `rThe following errors were detected when making sure all the drives and source
     `rpaths exists.
     `rPlease read the below issues and attempt to fix them if they are required.
-    `r$(Get-UIHeaderDivider)`n"
+    `r$(Get-UIHeaderDivider)`n" -ForegroundColor DarkYellow
     
     if ($errorData.DriveErrors) {
         Write-Verbose "Raw contents of errorData.DriveErrors: $($errorData.DriveErrors -join ", ")"
@@ -348,7 +352,7 @@ function Get-BackupRestoreErrorScreenUI {
         $message = "Unable to detect the following Drive<1>:
         `r`t"
         $message = $errorData.DriveErrors.Count -gt 1 ? $message.Replace("<1>", 's') : $message.Replace("<1>", '')
-        Write-Host "$($message + ($errorData.DriveErrors -join ", "))"
+        Write-Host "$($message + ($errorData.DriveErrors -join ", "))" -ForegroundColor DarkRed
     }
     if ($errorData.PathErrors) {
         Write-Verbose "Raw contents of errorData.PathErrors: $($errorData.PathErrors | Format-Table | Out-String)"
@@ -359,14 +363,14 @@ function Get-BackupRestoreErrorScreenUI {
         $message = "Path Error<1> detected, this script will skip the below entr<2> when performing the selected operation<3>:"
         $message = $numberOfSourceErrors -gt 1 ? $message.Replace("<1>", 's').Replace("<2>", "ies") : $message.Replace("<1>", '').Replace("<2>", 'y')
         $message = $numberOfJobErrors -gt 1 ? $message.Replace("<3>", 's') : $message.Replace("<3>", '')
-        Write-Host $message
+        Write-Host $message -ForegroundColor DarkRed
 
         $errorData.PathErrors | Foreach-Object {
             $message = "`tCan't $($_.JobOperation) from the below director<1> for the job `"$($_.JobName)`" because <2> do not exist:"
             $message = $_.Source.Count -gt 1 ? $message.Replace("<1>", "ies").Replace("<2>", "they") : $message.Replace("<1>", "y").Replace("<2> do", "it does")
-            Write-Host $message
+            Write-Host $message -ForegroundColor DarkRed
             $_.Source | ForEach-Object {
-                Write-Host "`t`t$_"
+                Write-Host "`t$_"
             }
         }
     }

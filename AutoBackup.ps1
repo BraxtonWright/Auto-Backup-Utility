@@ -175,12 +175,12 @@ function Get-UserDefinedThreads {
                 `r`tInput not an integer: $($intUserInput -isnot [int])
                 `r`tInput is not 'C'lear or 'B'ack: $($userInput -notin $validUserInput)"
 
-                Write-Host "ERROR:  Your input `"$userInput`" is not an integer."
+                Write-Host "ERROR:  Your input `"$userInput`" is not an integer." -ForegroundColor DarkRed
             }
             # Checks to see if input (which is an integer) is between 1 and the maximum number of threads for the system or 128 (the max thread count that RoboCopy can handle)
             elseif ($intUserInput -notin 1..$maxAllowedThreads) {
-                if ($intUserInput -gt $robocopyMaxThreads) { Write-Host "ERROR:  The max thread count that robocopy can handle is $robocopyMaxThreads threads." }
-                else { Write-Host "ERROR:  Your input `"$intUserInput`" is outside the capabilities of your system." }
+                if ($intUserInput -gt $robocopyMaxThreads) { Write-Host "ERROR:  The max thread count that robocopy can handle is $robocopyMaxThreads threads." -ForegroundColor DarkRed }
+                else { Write-Host "ERROR:  Your input `"$intUserInput`" is outside the capabilities of your system." -ForegroundColor DarkRed }
             }
         }
 
@@ -230,6 +230,8 @@ function Get-BackupRestoreSummaryScreen {
                     Destination  = $_.Destination
                     Description  = $_.Description
                     FileMatching = $_.FileMatching
+                    ExcludedFiles = $_.ExcludedFiles
+                    ExcludedDirectories = $_.ExcludedDirectories
                 }
             }
         }
@@ -301,7 +303,7 @@ function Get-BackupRestoreSummaryScreen {
     @{
         JobName = "Name of the job"
         JobOperation = "either 'backup' or 'restore'"
-        JobContent = [System.Collections.Generic.List[PSCustomObject]]@() # this contains an list of PSCustomObjects with the following properties "Source", "Destination", "Description", and "FileMatching"
+        JobContent = [System.Collections.Generic.List[PSCustomObject]]@() # this contains an list of PSCustomObjects with the following properties "Source", "Destination", "Description", "FileMatching", "ExcludedFiles", and "ExcludedDirectories"
     }
 .EXAMPLE
     $jobsToProcess = @(
@@ -314,6 +316,8 @@ function Get-BackupRestoreSummaryScreen {
                     Destination  = "C:/Folder 2"
                     Description  = "Mirroring Folder 1 to Folder 2"
                     FileMatching = ''
+                    ExcludedFiles = ''
+                    ExcludedDirectories = ''
                 }
             )
         },
@@ -326,12 +330,16 @@ function Get-BackupRestoreSummaryScreen {
                     Destination  = "C:/Folder 4"
                     Description  = "Copying all .exe and .png files from Folder 3 to Folder 4"
                     FileMatching = '*.exe/*.png'
+                    ExcludedFiles = ''
+                    ExcludedDirectories = ''
                 },
                 [PSCustomObject]@{
                     Source       = "C:/Folder 5"
                     Destination  = "C:/Folder 6"
                     Description  = "Mirroring Folder 5 to Folder 6"
                     FileMatching = ''
+                    ExcludedFiles = ''
+                    ExcludedDirectories = ''
                 }
             )
         }
@@ -359,6 +367,7 @@ function Start-Backup {
     Write-Verbose "Checking to see if the property `"JobContent`" has the new property named `"EntryFileCount`" inside them: $($jobsToProcess | ForEach-Object { $_.JobContent} | Format-Table | Out-String)"
 
     #region Robocopy parameters and what they do
+    # MIR = Mirror mode
     # W = Wait time between fails
     # R = Retry times
     # NDL = Don't log directory names
@@ -368,13 +377,14 @@ function Start-Backup {
     # NJS = Do not display robocopy job summary (JS)
 
     # can or can not be used depending on what the user choses while defining the job files and using this script
-    # MIR = Mirror mode
     # MT:<n> = Creates multi-threaded copies with n threads
+    # XF = Excludes files that match the specified names or paths
+    # XD = Excludes directories that match the specified names and paths
     # There are more parameters documented here, however they are not needed for this script https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
     #endregion
 
     # The below three varaibles will use what is called splatting to replace the contents of the array/hashtable into a cmdlet https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_splatting?view=powershell-5.1
-    $commonRobocopyParams = "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
+    $commonRobocopyParams = "/MIR", "/W:0", "/R:1", "/NDL", "/NC", "/BYTES", "/NJH", "/NJS"
     $overallProgressParameters = @{
         ID               = 0
         Activity         = "TBD"
@@ -415,14 +425,23 @@ function Start-Backup {
                 #region robocopy parameter processing
                 $toFromPaths = @( $_.Source, $_.Destination )
                 $fileList = $_.FileMatching -split '/' # if there is no entries inside here, it will simply be an empty array which the robocopy executible will ignore
+                $excludedFiles = $_.ExcludedFiles -split '/'
+                $excludedDirectories = $_.ExcludedDirectories -split '/'
                 $additionalRoboCopyParams = [System.Collections.Generic.List[string]]::new()
-                if ([string]::IsNullOrEmpty($_.FileMatching)) { $additionalRoboCopyParams.Add("/MIR") }
                 if (-not [string]::IsNullOrEmpty($Global:userDefinedThreads)) { $additionalRoboCopyParams.Add("/MT:$Global:userDefinedThreads") }
+                if ($_.ExcludedFiles -ne '') {
+                    $additionalRoboCopyParams.Add("/XF")
+                    $excludedFiles | Foreach-Object { $additionalRoboCopyParams.Add($_) }
+                }
+                if ($_.ExcludedDirectories -ne '') {
+                    $additionalRoboCopyParams.Add("/XD")
+                    $excludedDirectories | Foreach-Object { $additionalRoboCopyParams.Add($_) }
+                }
                 #endregion
 
                 # This will store the robocopy executible and the parameters for robocopy in variables so that we will simply have to call "& $executable $params" to have it be executed https://stackoverflow.com/questions/29562598/powershell-with-robocopy-and-arguments-passing
                 $executable = "Robocopy.exe"
-                $params = $toFromPaths + $fileList + $additionalRoboCopyParams + $commonRobocopyParams
+                $params = $toFromPaths + $fileList + $commonRobocopyParams + $additionalRoboCopyParams
 
                 Write-Verbose "`tRunning the command '$executable $params'"
                 & $executable $params | Get-RobocopyProgress $overallProgressParameters $jobProgressParameters $helperVariables    
